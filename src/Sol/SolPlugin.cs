@@ -88,6 +88,7 @@ public sealed partial class SolPlugin : BasePlugin, IPluginConfig<SolConfig>
         if (!Config.Enabled) return HookResult.Continue;
 
         _roundToken++;
+        CleanupChaosEntities();
         RestoreBombTargets();
         Server.ExecuteCommand("mp_ignore_round_win_conditions 0");
 
