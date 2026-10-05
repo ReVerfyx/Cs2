@@ -10,10 +10,10 @@ using Microsoft.Extensions.Logging;
 
 namespace Sol;
 
-public sealed class SolPlugin : BasePlugin, IPluginConfig<SolConfig>
+public sealed partial class SolPlugin : BasePlugin, IPluginConfig<SolConfig>
 {
     public override string ModuleName => "Соль";
-    public override string ModuleVersion => "0.1.0";
+    public override string ModuleVersion => "0.2.0";
     public override string ModuleAuthor => "ReVerfyx";
     public override string ModuleDescription => "Абсурдный chaos-mode для CS2.";
 
@@ -39,6 +39,8 @@ public sealed class SolPlugin : BasePlugin, IPluginConfig<SolConfig>
         config.AirPlantHoldSeconds = Math.Clamp(config.AirPlantHoldSeconds, 2f, 20f);
         config.PvoIntervalSeconds = Math.Max(4f, config.PvoIntervalSeconds);
         config.DroneIntervalSeconds = Math.Max(4f, config.DroneIntervalSeconds);
+        config.MeteorIntervalSeconds = Math.Max(1.5f, config.MeteorIntervalSeconds);
+        config.ChickenRainCount = Math.Clamp(config.ChickenRainCount, 1, 40);
         Config = config;
     }
 
@@ -50,7 +52,15 @@ public sealed class SolPlugin : BasePlugin, IPluginConfig<SolConfig>
             return;
         }
 
-        Logger.LogInformation("Соль загружена. Режим хаоса готов.");
+        RegisterChaosResources();
+        Logger.LogInformation("Соль загружена. Визуальный режим хаоса готов.");
+    }
+
+    public override void Unload(bool hotReload)
+    {
+        _roundToken++;
+        CleanupChaosEntities();
+        RestoreBombTargets();
     }
 
     [GameEventHandler]
@@ -142,6 +152,12 @@ public sealed class SolPlugin : BasePlugin, IPluginConfig<SolConfig>
             ("ТАНКИ", _ => TankMode()),
             ("ДРОНЫ-КАМИКАДЗЕ", DroneSwarm),
             ("ПВО", PvoMode),
+            ("МЕТЕОРИТНЫЙ ДОЖДЬ", MeteorRain),
+            ("ДОЖДЬ ИЗ КУР", ChickenRain),
+            ("ЧЁРНАЯ ДЫРА", BlackHole),
+            ("МЕБЕЛЬНЫЙ ТОРНАДО", FurnitureTornado),
+            ("СТЕНА ИЗ СЕЙФОВ", WallOfSafes),
+            ("ОРБИТАЛЬНЫЕ C4", OrbitingC4),
             ("ТИММЕЙТ = БОМБА + ПЛЭНТ В ВОЗДУХЕ", BuddyBombMode),
             ("НАСТОЯЩИЙ БОМБСАЙТ В ВОЗДУХЕ", _ => LiftBombSites()),
             ("C4 НА 10 СЕКУНД", _ => Server.ExecuteCommand("mp_c4timer 10")),
@@ -172,6 +188,7 @@ public sealed class SolPlugin : BasePlugin, IPluginConfig<SolConfig>
 
     private void ResetRoundState()
     {
+        CleanupChaosEntities();
         _buddyBombSlot = null;
         _airPlantPoint = null;
         _airPlantHeld = 0f;
@@ -361,8 +378,9 @@ public sealed class SolPlugin : BasePlugin, IPluginConfig<SolConfig>
                 // Оружие не критично: роль танка всё равно работает по HP/броне.
             }
 
+            AddTankVisual(tank, _roundToken);
             tank.PrintToCenter("ТЫ ТАНК: 350 HP + 100 ARMOR");
-            Broadcast($"[СОЛЬ] {tank.PlayerName} назначен танком.");
+            Broadcast($"[СОЛЬ] {tank.PlayerName} назначен танком. Теперь ещё и выглядит подозрительно.");
         }
     }
 
@@ -389,6 +407,7 @@ public sealed class SolPlugin : BasePlugin, IPluginConfig<SolConfig>
         Utilities.SetStateChanged(pawn, "CBaseEntity", "m_iHealth");
 
         SetFlying(buddy, true);
+        SpawnAirPlantVisual();
         Server.ExecuteCommand("mp_ignore_round_win_conditions 1");
 
         Broadcast($"[СОЛЬ] БОМБА = {buddy.PlayerName}. Он должен зависнуть в воздушном плэнте {Config.AirPlantHoldSeconds:0.#} сек.");
@@ -496,14 +515,20 @@ public sealed class SolPlugin : BasePlugin, IPluginConfig<SolConfig>
             target.PrintToCenter("ПВО: ЗАХВАТ ЦЕЛИ\n2 СЕКУНДЫ ДО УДАРА");
             Broadcast($"[ПВО] захвачена цель: {target.PlayerName}");
 
-            AddTimer(2.0f, () =>
+            if (Config.EnableVisualEntities)
             {
-                if (token != _roundToken) return;
-                var stillAlive = AlivePlayers().FirstOrDefault(p => p.Slot == target.Slot);
-                if (stillAlive is null) return;
-
-                Damage(stillAlive, 140, explode: true);
-            }, TimerFlags.STOP_ON_MAPCHANGE);
+                LaunchVisualMissile(target, token);
+            }
+            else
+            {
+                AddTimer(2.0f, () =>
+                {
+                    if (token != _roundToken) return;
+                    var stillAlive = AlivePlayers().FirstOrDefault(p => p.Slot == target.Slot);
+                    if (stillAlive is null) return;
+                    Damage(stillAlive, 140, explode: true);
+                }, TimerFlags.STOP_ON_MAPCHANGE);
+            }
         }, TimerFlags.REPEAT | TimerFlags.STOP_ON_MAPCHANGE);
     }
 
@@ -527,21 +552,28 @@ public sealed class SolPlugin : BasePlugin, IPluginConfig<SolConfig>
             target.PrintToCenter("ДРОН ВЫБРАЛ ТЕБЯ\n3... 2... 1...");
             Broadcast($"[ДРОН] летит к {target.PlayerName}");
 
-            AddTimer(3.0f, () =>
+            if (Config.EnableVisualEntities)
             {
-                if (token != _roundToken) return;
+                LaunchVisualDrone(target, token);
+            }
+            else
+            {
+                AddTimer(3.0f, () =>
+                {
+                    if (token != _roundToken) return;
 
-                var live = AlivePlayers().FirstOrDefault(p => p.Slot == slot);
-                var pawn = live is null ? null : Pawn(live);
-                if (live is null || pawn is null) return;
+                    var live = AlivePlayers().FirstOrDefault(p => p.Slot == slot);
+                    var pawn = live is null ? null : Pawn(live);
+                    if (live is null || pawn is null) return;
 
-                pawn.Teleport(null, null, new Vector(
-                    _random.Next(-450, 451),
-                    _random.Next(-450, 451),
-                    _random.Next(450, 801)));
+                    pawn.Teleport(null, null, new Vector(
+                        _random.Next(-450, 451),
+                        _random.Next(-450, 451),
+                        _random.Next(450, 801)));
 
-                Damage(live, 85, explode: true);
-            }, TimerFlags.STOP_ON_MAPCHANGE);
+                    Damage(live, 85, explode: true);
+                }, TimerFlags.STOP_ON_MAPCHANGE);
+            }
         }, TimerFlags.REPEAT | TimerFlags.STOP_ON_MAPCHANGE);
     }
 
