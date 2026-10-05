@@ -192,6 +192,7 @@ public sealed class SolPlugin : BasePlugin, IPluginConfig<SolConfig>
             if (pawn is null) continue;
 
             pawn.MoveType = MoveType_t.MOVETYPE_WALK;
+            pawn.ActualMoveType = MoveType_t.MOVETYPE_WALK;
             Utilities.SetStateChanged(pawn, "CBaseEntity", "m_MoveType");
         }
     }
@@ -565,6 +566,7 @@ public sealed class SolPlugin : BasePlugin, IPluginConfig<SolConfig>
         if (pawn is null) return;
 
         pawn.MoveType = flying ? MoveType_t.MOVETYPE_NOCLIP : MoveType_t.MOVETYPE_WALK;
+        pawn.ActualMoveType = flying ? MoveType_t.MOVETYPE_OBSERVER : MoveType_t.MOVETYPE_WALK;
         Utilities.SetStateChanged(pawn, "CBaseEntity", "m_MoveType");
     }
 
