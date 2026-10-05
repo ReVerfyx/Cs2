@@ -114,7 +114,7 @@ css_salt_map
 - Linux CS2 Dedicated Server;
 - Metamod:Source 2.x;
 - CounterStrikeSharp;
-- .NET 8;
+- .NET 10;
 - CounterStrikeSharp.API 1.0.376.
 
 ## Сборка
