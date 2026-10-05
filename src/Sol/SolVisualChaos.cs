@@ -581,6 +581,147 @@ public sealed partial class SolPlugin
         }, TimerFlags.REPEAT | TimerFlags.STOP_ON_MAPCHANGE);
     }
 
+
+    private void SpawnRoundJunk(int token)
+    {
+        if (!Config.EnableVisualEntities) return;
+
+        var players = AlivePlayers();
+        if (players.Count == 0) return;
+
+        string[] models = [ChairModel, C4Model, Config.TankBodyModel, Config.DroneModel];
+        var count = _random.Next(7, 14);
+
+        for (var i = 0; i < count; i++)
+        {
+            var anchor = Pick(players);
+            var pawn = anchor is null ? null : Pawn(anchor);
+            if (pawn?.AbsOrigin is null) continue;
+
+            var model = models[_random.Next(models.Length)];
+            SpawnDynamic(model, new Vector(
+                pawn.AbsOrigin.X + _random.Next(-650, 651),
+                pawn.AbsOrigin.Y + _random.Next(-650, 651),
+                pawn.AbsOrigin.Z + _random.Next(180, 650)),
+                new QAngle(_random.Next(0, 360), _random.Next(0, 360), _random.Next(0, 360)));
+        }
+
+        Broadcast("[СОЛЬ] Небо опять завалило случайным мусором.");
+    }
+
+    private void SpawnPvoBattery()
+    {
+        if (!Config.EnableVisualEntities) return;
+
+        var anchors = AlivePlayers().OrderBy(_ => _random.Next()).Take(2).ToList();
+        foreach (var player in anchors)
+        {
+            var pawn = Pawn(player);
+            if (pawn?.AbsOrigin is null) continue;
+
+            var pos = new Vector(
+                pawn.AbsOrigin.X + _random.Next(-260, 261),
+                pawn.AbsOrigin.Y + _random.Next(-260, 261),
+                pawn.AbsOrigin.Z);
+
+            SpawnDynamic(Config.DroneModel, pos, new QAngle(0, _random.Next(0, 360), 0));
+            SpawnWorldText("ПВО", new Vector(pos.X, pos.Y, pos.Z + 95f));
+        }
+    }
+
+    private void StartTankCannon(CCSPlayerController tank, int token)
+    {
+        CounterStrikeSharp.API.Modules.Timers.Timer? timer = null;
+        timer = AddTimer(6.0f, () =>
+        {
+            if (token != _roundToken)
+            {
+                timer?.Kill();
+                return;
+            }
+
+            var liveTank = AlivePlayers().FirstOrDefault(p => p.Slot == tank.Slot);
+            if (liveTank is null)
+            {
+                timer?.Kill();
+                return;
+            }
+
+            var enemyTeam = liveTank.Team == CsTeam.Terrorist ? CsTeam.CounterTerrorist : CsTeam.Terrorist;
+            var target = Pick(AlivePlayers(enemyTeam));
+            if (target is null) return;
+
+            liveTank.PrintToCenter($"ТАНКОВЫЙ ВЫСТРЕЛ → {target.PlayerName}");
+            LaunchTankShell(liveTank, target, token);
+        }, TimerFlags.REPEAT | TimerFlags.STOP_ON_MAPCHANGE);
+    }
+
+    private void LaunchTankShell(CCSPlayerController tank, CCSPlayerController target, int token)
+    {
+        var tankPawn = Pawn(tank);
+        var targetPawn = Pawn(target);
+        if (tankPawn?.AbsOrigin is null || targetPawn?.AbsOrigin is null) return;
+
+        if (!Config.EnableVisualEntities)
+        {
+            AddTimer(0.8f, () =>
+            {
+                if (token != _roundToken) return;
+                var live = AlivePlayers().FirstOrDefault(p => p.Slot == target.Slot);
+                if (live is not null) Damage(live, 95, explode: true);
+            }, TimerFlags.STOP_ON_MAPCHANGE);
+            return;
+        }
+
+        var shell = SpawnDynamic(Config.MissileModel, new Vector(
+            tankPawn.AbsOrigin.X,
+            tankPawn.AbsOrigin.Y,
+            tankPawn.AbsOrigin.Z + 65f));
+
+        if (shell is null) return;
+
+        var steps = 0;
+        CounterStrikeSharp.API.Modules.Timers.Timer? shellTimer = null;
+        shellTimer = AddTimer(0.05f, () =>
+        {
+            if (token != _roundToken || shell is not { IsValid: true })
+            {
+                shellTimer?.Kill();
+                return;
+            }
+
+            var liveTarget = AlivePlayers().FirstOrDefault(p => p.Slot == target.Slot);
+            var livePawn = liveTarget is null ? null : Pawn(liveTarget);
+
+            if (livePawn?.AbsOrigin is null || shell.AbsOrigin is null)
+            {
+                shellTimer?.Kill();
+                if (shell.IsValid) shell.Remove();
+                return;
+            }
+
+            steps++;
+            var from = shell.AbsOrigin;
+            var to = livePawn.AbsOrigin;
+            var alpha = 0.16f;
+            var next = new Vector(
+                from.X + (to.X - from.X) * alpha,
+                from.Y + (to.Y - from.Y) * alpha,
+                from.Z + (to.Z + 20f - from.Z) * alpha);
+
+            shell.Teleport(next, shell.AbsRotation, null);
+
+            if (Distance(next, to) < 60f || steps > 55)
+            {
+                shellTimer?.Kill();
+                var blast = Copy(to);
+                if (shell.IsValid) shell.Remove();
+                ExplosionFx(blast, 320, 120);
+            }
+        }, TimerFlags.REPEAT | TimerFlags.STOP_ON_MAPCHANGE);
+    }
+
+
     private void OrbitingC4(int token)
     {
         var carrier = Pick(AlivePlayers());
