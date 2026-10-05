@@ -1,0 +1,31 @@
+name: build-sol
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        run: dotnet restore src/Sol/Sol.csproj
+
+      - name: Build
+        run: dotnet build src/Sol/Sol.csproj -c Release --no-restore
+
+      - name: Publish
+        run: dotnet publish src/Sol/Sol.csproj -c Release --no-build -o build/Sol
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Sol
+          path: build/Sol/
