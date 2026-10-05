@@ -6,6 +6,7 @@ using CounterStrikeSharp.API.Modules.Config;
 using CounterStrikeSharp.API.Modules.Entities.Constants;
 using CounterStrikeSharp.API.Modules.Timers;
 using CounterStrikeSharp.API.Modules.Utils;
+using Microsoft.Extensions.Logging;
 
 namespace Sol;
 
