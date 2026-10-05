@@ -133,6 +133,8 @@ public sealed partial class SolPlugin : BasePlugin, IPluginConfig<SolConfig>
         if (Config.AlwaysGiveOneFlyerPerTeam)
             GiveRandomFlyerToEachTeam();
 
+        SpawnRoundJunk(token);
+
         var anomalies = new List<(string Name, Action<int> Run)>
         {
             ("ЛУНА", _ => Gravity(260)),
@@ -380,7 +382,8 @@ public sealed partial class SolPlugin : BasePlugin, IPluginConfig<SolConfig>
             }
 
             AddTankVisual(tank, _roundToken);
-            tank.PrintToCenter("ТЫ ТАНК: 350 HP + 100 ARMOR");
+            StartTankCannon(tank, _roundToken);
+            tank.PrintToCenter("ТЫ ТАНК: 350 HP + 100 ARMOR + АВТОПУШКА");
             Broadcast($"[СОЛЬ] {tank.PlayerName} назначен танком. Теперь ещё и выглядит подозрительно.");
         }
     }
@@ -495,6 +498,7 @@ public sealed partial class SolPlugin : BasePlugin, IPluginConfig<SolConfig>
 
     private void PvoMode(int token)
     {
+        SpawnPvoBattery();
         Broadcast("[СОЛЬ] ПВО включено. Летающие игроки теперь официально цели.");
 
         CounterStrikeSharp.API.Modules.Timers.Timer? timer = null;
