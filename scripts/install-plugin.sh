@@ -24,7 +24,7 @@ if [[ ! -d "$CSS_DIR" ]]; then
 fi
 
 if ! command -v dotnet >/dev/null 2>&1; then
-  echo "ERROR: dotnet SDK 8 is required to build the plugin."
+  echo "ERROR: dotnet SDK 10 is required to build the plugin."
   exit 4
 fi
 
