@@ -50,26 +50,26 @@ jobs:
 
       - name: Prepare release asset
         run: |
-          cp winlator-src/app/build/outputs/apk/debug/app-debug.apk CS2-Mobile-v0.4.5-alpha.apk
-          sha256sum CS2-Mobile-v0.4.5-alpha.apk > CS2-Mobile-v0.4.5-alpha.sha256
+          cp winlator-src/app/build/outputs/apk/debug/app-debug.apk CS2-Mobile-v0.4.6-alpha.apk
+          sha256sum CS2-Mobile-v0.4.6-alpha.apk > CS2-Mobile-v0.4.6-alpha.sha256
 
       - name: Upload Actions artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CS2-Mobile-v0.4.5-alpha
+          name: CS2-Mobile-v0.4.6-alpha
           path: |
-            CS2-Mobile-v0.4.5-alpha.apk
-            CS2-Mobile-v0.4.5-alpha.sha256
+            CS2-Mobile-v0.4.6-alpha.apk
+            CS2-Mobile-v0.4.6-alpha.sha256
 
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG='v0.4.5-alpha'
+          TAG='v0.4.6-alpha'
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" CS2-Mobile-v0.4.5-alpha.apk CS2-Mobile-v0.4.5-alpha.sha256 --clobber
+            gh release upload "$TAG" CS2-Mobile-v0.4.6-alpha.apk CS2-Mobile-v0.4.6-alpha.sha256 --clobber
           else
-            gh release create "$TAG" CS2-Mobile-v0.4.5-alpha.apk CS2-Mobile-v0.4.5-alpha.sha256 \
-              --title 'CS2 Mobile v0.4.5 alpha' \
-              --notes 'New first-launch setup flow: launcher stays in normal sensor orientation like Winlator, requests storage where applicable, microphone for CS2 voice chat and notifications where applicable, then prepares the runtime. Landscape starts only when Steam/CS2 opens. Adds animated CS2 Mobile setup UI and smooth game transition. Keeps runtime/bootstrap fixes and customizable touch HUD.'
+            gh release create "$TAG" CS2-Mobile-v0.4.6-alpha.apk CS2-Mobile-v0.4.6-alpha.sha256 \
+              --title 'CS2 Mobile v0.4.6 alpha' \
+              --notes 'Polishes the first-launch setup and upgrade path: launcher stays in normal sensor orientation, requests storage only on legacy Android, microphone for CS2 voice chat and notifications where applicable, then prepares the runtime. Existing installs are also prompted for newly missing permissions. Landscape starts only when Steam/CS2 opens. Includes animated CS2 Mobile UI and customizable touch HUD.'
           fi
