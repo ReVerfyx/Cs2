@@ -14,8 +14,8 @@ drawable_dir = root / "app/src/main/res/drawable"
 gradle = root / "app/build.gradle"
 s = gradle.read_text(encoding="utf-8")
 s = s.replace("applicationId 'com.winlator'", "applicationId 'com.reverfyx.cs2mobile'")
-s = s.replace('versionCode 33', 'versionCode 43')
-s = s.replace('versionName "11.2"', 'versionName "0.4.3-alpha"')
+s = s.replace('versionCode 33', 'versionCode 44')
+s = s.replace('versionName "11.2"', 'versionName "0.4.4-alpha"')
 gradle.write_text(s, encoding="utf-8")
 
 # Replace Winlator branding in every localized string table so Android cannot pick an old localized app name.
