@@ -73,10 +73,20 @@ public class CS2LauncherActivity extends AppCompatActivity {
 
         buildUi();
         animateEntrance();
-        setStage("ПЕРВЫЙ ЗАПУСК");
-        setState("Проверяем разрешения Android…", "ПОДГОТОВКА…", false, null);
 
-        handler.postDelayed(this::ensurePermissionsThenBootstrap, 450);
+        // Do not rotate or start the heavy runtime immediately.
+        // First show a normal launcher screen, then permissions/setup, and only later Steam/CS2.
+        RootFS rootFS = RootFS.find(this);
+        if (rootFS.isValid()) {
+            bootstrapStarted = true;
+            setStage("ОКРУЖЕНИЕ ГОТОВО");
+            setState("Проверяем Steam и Counter-Strike 2…", "ПРОВЕРКА…", false, null);
+            handler.postDelayed(this::refreshState, 350);
+        } else {
+            setStage("ДОБРО ПОЖАЛОВАТЬ");
+            setState("Сначала настроим Android-разрешения и игровое окружение. CS2 запустится только после этого.",
+                    "НАЧАТЬ НАСТРОЙКУ", true, this::ensurePermissionsThenBootstrap);
+        }
     }
 
     @Override
@@ -135,9 +145,14 @@ public class CS2LauncherActivity extends AppCompatActivity {
             missing.add(Manifest.permission.POST_NOTIFICATIONS);
         }
 
+        // Voice chat in CS2 needs microphone access. It is requested during setup, not at game launch.
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            missing.add(Manifest.permission.RECORD_AUDIO);
+        }
+
         if (!missing.isEmpty()) {
             setStage("РАЗРЕШЕНИЯ");
-            setState("Разреши доступ, чтобы runtime и фоновые процессы работали стабильнее.",
+            setState("Разреши уведомления и микрофон для фоновой работы и голосового чата. Интернет доступен автоматически.",
                     "РАЗРЕШИТЬ", true,
                     () -> ActivityCompat.requestPermissions(
                             this,
