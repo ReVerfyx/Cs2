@@ -14,8 +14,8 @@ drawable_dir = root / "app/src/main/res/drawable"
 gradle = root / "app/build.gradle"
 s = gradle.read_text(encoding="utf-8")
 s = s.replace("applicationId 'com.winlator'", "applicationId 'com.reverfyx.cs2mobile'")
-s = s.replace('versionCode 33', 'versionCode 44')
-s = s.replace('versionName "11.2"', 'versionName "0.4.4-alpha"')
+s = s.replace('versionCode 33', 'versionCode 45')
+s = s.replace('versionName "11.2"', 'versionName "0.4.5-alpha"')
 gradle.write_text(s, encoding="utf-8")
 
 # Replace Winlator branding in every localized string table so Android cannot pick an old localized app name.
@@ -27,6 +27,9 @@ for strings in (root / "app/src/main/res").glob("values*/strings.xml"):
 
 manifest = root / "app/src/main/AndroidManifest.xml"
 s = manifest.read_text(encoding="utf-8")
+if 'android.permission.RECORD_AUDIO' not in s:
+    s = s.replace('<uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>',
+                  '<uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>\n    <uses-permission android:name="android.permission.RECORD_AUDIO"/>')
 if 'android.permission.RECORD_AUDIO' not in s:
     s = s.replace('<uses-permission android:name="android.permission.VIBRATE"/>',
                   '<uses-permission android:name="android.permission.VIBRATE"/>\\n    <uses-permission android:name="android.permission.RECORD_AUDIO"/>')
