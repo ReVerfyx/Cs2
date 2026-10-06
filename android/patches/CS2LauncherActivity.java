@@ -139,6 +139,11 @@ public class CS2LauncherActivity extends AppCompatActivity {
             }
         }
 
+        // Voice chat in CS2 needs microphone access. Denial does not block the app.
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            missing.add(Manifest.permission.RECORD_AUDIO);
+        }
+
         // Foreground service notifications are useful while Steam/CS2 is running in the background.
         if (Build.VERSION.SDK_INT >= 33 &&
                 ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
