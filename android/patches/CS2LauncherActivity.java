@@ -77,11 +77,15 @@ public class CS2LauncherActivity extends AppCompatActivity {
         // Do not rotate or start the heavy runtime immediately.
         // First show a normal launcher screen, then permissions/setup, and only later Steam/CS2.
         RootFS rootFS = RootFS.find(this);
-        if (rootFS.isValid()) {
+        if (rootFS.isValid() && !hasMissingStartupPermissions()) {
             bootstrapStarted = true;
             setStage("ОКРУЖЕНИЕ ГОТОВО");
             setState("Проверяем Steam и Counter-Strike 2…", "ПРОВЕРКА…", false, null);
             handler.postDelayed(this::refreshState, 350);
+        } else if (rootFS.isValid()) {
+            setStage("РАЗРЕШЕНИЯ");
+            setState("После обновления нужны дополнительные Android-разрешения для уведомлений и голосового чата.",
+                    "НАСТРОИТЬ РАЗРЕШЕНИЯ", true, this::ensurePermissionsThenBootstrap);
         } else {
             setStage("ДОБРО ПОЖАЛОВАТЬ");
             setState("Сначала настроим Android-разрешения и игровое окружение. CS2 запустится только после этого.",
@@ -126,6 +130,20 @@ public class CS2LauncherActivity extends AppCompatActivity {
         super.onBackPressed();
     }
 
+    private boolean hasMissingStartupPermissions() {
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.S_V2) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED ||
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                return true;
+            }
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            return true;
+        }
+        return Build.VERSION.SDK_INT >= 33 &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED;
+    }
+
     private void ensurePermissionsThenBootstrap() {
         ArrayList<String> missing = new ArrayList<>();
 
@@ -148,11 +166,6 @@ public class CS2LauncherActivity extends AppCompatActivity {
         if (Build.VERSION.SDK_INT >= 33 &&
                 ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             missing.add(Manifest.permission.POST_NOTIFICATIONS);
-        }
-
-        // Voice chat in CS2 needs microphone access. It is requested during setup, not at game launch.
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            missing.add(Manifest.permission.RECORD_AUDIO);
         }
 
         if (!missing.isEmpty()) {
@@ -183,7 +196,7 @@ public class CS2LauncherActivity extends AppCompatActivity {
 
             if (!allGranted) {
                 setStage("РАЗРЕШЕНИЯ ОГРАНИЧЕНЫ");
-                setState("Часть разрешений не выдана. Продолжим, но фоновые функции или доступ к файлам могут быть ограничены.",
+                setState("Часть разрешений не выдана. Продолжим, но уведомления или голосовой чат могут быть ограничены.",
                         "ПРОДОЛЖИТЬ", true, this::startBootstrap);
             } else {
                 setStage("РАЗРЕШЕНИЯ ГОТОВЫ");
