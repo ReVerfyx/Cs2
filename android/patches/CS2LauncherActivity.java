@@ -1,8 +1,6 @@
 package com.winlator;
 
 import android.Manifest;
-import android.animation.ObjectAnimator;
-import android.animation.ValueAnimator;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -10,13 +8,14 @@ import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
-import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.SeekBar;
@@ -44,7 +43,10 @@ import org.json.JSONObject;
 import java.io.File;
 import java.util.ArrayList;
 
-/** Single-purpose launcher: setup -> Steam -> Counter-Strike 2 (AppID 730). */
+/**
+ * Minimal CS2-only Android launcher.
+ * Launcher stays portrait. Steam/CS2 runtime remains landscape.
+ */
 public class CS2LauncherActivity extends AppCompatActivity {
     private static final int REQUEST_STARTUP_PERMISSIONS = 730;
     private static final String CS2_PROFILE_NAME = "CS2 Mobile";
@@ -52,18 +54,18 @@ public class CS2LauncherActivity extends AppCompatActivity {
     private static final String PREF_OVERLAY_OPACITY = "overlay_opacity";
 
     private final Handler handler = new Handler(Looper.getMainLooper());
+
     private LinearLayout rootView;
     private TextView title;
     private TextView status;
-    private TextView stageText;
-    private View pulseDot;
     private Button action;
     private Button controlsButton;
+    private Button settingsButton;
+
     private Container container;
     private boolean creatingContainer;
-    private boolean controlsSettingsVisible;
+    private boolean subPageVisible;
     private boolean bootstrapStarted;
-    private ObjectAnimator pulseAnimator;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -71,26 +73,9 @@ public class CS2LauncherActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         AppUtils.keepScreenOn(this);
 
-        buildUi();
-        animateEntrance();
-
-        // Do not rotate or start the heavy runtime immediately.
-        // First show a normal launcher screen, then permissions/setup, and only later Steam/CS2.
-        RootFS rootFS = RootFS.find(this);
-        if (rootFS.isValid() && !hasMissingStartupPermissions()) {
-            bootstrapStarted = true;
-            setStage("ОКРУЖЕНИЕ ГОТОВО");
-            setState("Проверяем Steam и Counter-Strike 2…", "ПРОВЕРКА…", false, null);
-            handler.postDelayed(this::refreshState, 350);
-        } else if (rootFS.isValid()) {
-            setStage("РАЗРЕШЕНИЯ");
-            setState("После обновления нужны дополнительные Android-разрешения для уведомлений и голосового чата.",
-                    "НАСТРОИТЬ РАЗРЕШЕНИЯ", true, this::ensurePermissionsThenBootstrap);
-        } else {
-            setStage("ДОБРО ПОЖАЛОВАТЬ");
-            setState("Сначала настроим Android-разрешения и игровое окружение. CS2 запустится только после этого.",
-                    "НАЧАТЬ НАСТРОЙКУ", true, this::ensurePermissionsThenBootstrap);
-        }
+        buildMainUi();
+        animateIn();
+        initializeState();
     }
 
     @Override
@@ -103,31 +88,46 @@ public class CS2LauncherActivity extends AppCompatActivity {
         super.onResume();
         if (rootView != null) {
             rootView.setAlpha(1f);
-            rootView.setScaleX(1f);
-            rootView.setScaleY(1f);
+            rootView.setTranslationY(0f);
         }
-        if (!controlsSettingsVisible && bootstrapStarted && status != null) {
-            handler.postDelayed(this::refreshState, 500);
+        if (!subPageVisible && bootstrapStarted && status != null) {
+            handler.postDelayed(this::refreshState, 450);
         }
     }
 
     @Override
     protected void onDestroy() {
         handler.removeCallbacksAndMessages(null);
-        if (pulseAnimator != null) pulseAnimator.cancel();
         super.onDestroy();
     }
 
     @Override
     public void onBackPressed() {
-        if (controlsSettingsVisible) {
-            controlsSettingsVisible = false;
-            buildUi();
-            animateEntrance();
-            handler.post(this::refreshState);
+        if (subPageVisible) {
+            subPageVisible = false;
+            buildMainUi();
+            animateIn();
+            if (bootstrapStarted) refreshState();
+            else initializeState();
             return;
         }
         super.onBackPressed();
+    }
+
+    private void initializeState() {
+        RootFS rootFS = RootFS.find(this);
+
+        if (rootFS.isValid()) {
+            bootstrapStarted = true;
+            refreshState();
+            return;
+        }
+
+        if (hasMissingStartupPermissions()) {
+            setState("Нужны разрешения Android", "Продолжить", true, this::requestStartupPermissions);
+        } else {
+            setState("Первичная настройка", "Начать", true, this::startBootstrap);
+        }
     }
 
     private boolean hasMissingStartupPermissions() {
@@ -137,17 +137,18 @@ public class CS2LauncherActivity extends AppCompatActivity {
                 return true;
             }
         }
+
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             return true;
         }
+
         return Build.VERSION.SDK_INT >= 33 &&
                 ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED;
     }
 
-    private void ensurePermissionsThenBootstrap() {
+    private void requestStartupPermissions() {
         ArrayList<String> missing = new ArrayList<>();
 
-        // Winlator-style legacy storage access on Android versions where these permissions are meaningful.
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.S_V2) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
                 missing.add(Manifest.permission.READ_EXTERNAL_STORAGE);
@@ -157,53 +158,32 @@ public class CS2LauncherActivity extends AppCompatActivity {
             }
         }
 
-        // Voice chat in CS2 needs microphone access. Denial does not block the app.
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             missing.add(Manifest.permission.RECORD_AUDIO);
         }
 
-        // Foreground service notifications are useful while Steam/CS2 is running in the background.
         if (Build.VERSION.SDK_INT >= 33 &&
                 ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             missing.add(Manifest.permission.POST_NOTIFICATIONS);
         }
 
-        if (!missing.isEmpty()) {
-            setStage("РАЗРЕШЕНИЯ");
-            setState("Разреши уведомления и микрофон для фоновой работы и голосового чата. Интернет доступен автоматически.",
-                    "РАЗРЕШИТЬ", true,
-                    () -> ActivityCompat.requestPermissions(
-                            this,
-                            missing.toArray(new String[0]),
-                            REQUEST_STARTUP_PERMISSIONS));
+        if (missing.isEmpty()) {
+            startBootstrap();
             return;
         }
 
-        startBootstrap();
+        ActivityCompat.requestPermissions(
+                this,
+                missing.toArray(new String[0]),
+                REQUEST_STARTUP_PERMISSIONS
+        );
     }
 
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQUEST_STARTUP_PERMISSIONS) {
-            boolean allGranted = true;
-            for (int result : grantResults) {
-                if (result != PackageManager.PERMISSION_GRANTED) {
-                    allGranted = false;
-                    break;
-                }
-            }
-
-            if (!allGranted) {
-                setStage("РАЗРЕШЕНИЯ ОГРАНИЧЕНЫ");
-                setState("Часть разрешений не выдана. Продолжим, но уведомления или голосовой чат могут быть ограничены.",
-                        "ПРОДОЛЖИТЬ", true, this::startBootstrap);
-            } else {
-                setStage("РАЗРЕШЕНИЯ ГОТОВЫ");
-                setState("Разрешения получены. Подготавливаем игровое окружение…",
-                        "ПОДГОТОВКА…", false, null);
-                handler.postDelayed(this::startBootstrap, 300);
-            }
+            setState("Подготовка приложения", "Продолжить", true, this::startBootstrap);
         }
     }
 
@@ -212,248 +192,220 @@ public class CS2LauncherActivity extends AppCompatActivity {
             refreshState();
             return;
         }
+
         bootstrapStarted = true;
-        setStage("ПОДГОТОВКА RUNTIME");
-        setState("Распаковываем игровое окружение. Первый запуск может занять немного времени.",
-                "ПОДГОТОВКА…", false, null);
+        setState("Подготовка окружения…", "Подождите", false, null);
 
         try {
             RootFSInstaller.installIfNeeded(this);
         } catch (Throwable t) {
-            setState("Ошибка подготовки окружения: " + safeMessage(t), "ПОВТОРИТЬ", true, this::retryBootstrap);
+            setState("Ошибка: " + safeMessage(t), "Повторить", true, this::retryBootstrap);
             return;
         }
 
-        handler.postDelayed(this::refreshState, 450);
+        handler.postDelayed(this::refreshState, 500);
     }
 
     private void retryBootstrap() {
         bootstrapStarted = true;
         try {
             RootFSInstaller.installIfNeeded(this);
-            handler.postDelayed(this::refreshState, 700);
+            handler.postDelayed(this::refreshState, 600);
         } catch (Throwable t) {
-            setState("Ошибка подготовки окружения: " + safeMessage(t), "ПОВТОРИТЬ", true, this::retryBootstrap);
+            setState("Ошибка: " + safeMessage(t), "Повторить", true, this::retryBootstrap);
         }
     }
 
-    private void buildUi() {
-        controlsSettingsVisible = false;
-        if (pulseAnimator != null) pulseAnimator.cancel();
+    private void buildMainUi() {
+        subPageVisible = false;
 
         rootView = new LinearLayout(this);
         rootView.setOrientation(LinearLayout.VERTICAL);
-        rootView.setGravity(Gravity.CENTER_HORIZONTAL);
-        rootView.setPadding(dp(24), dp(44), dp(24), dp(32));
-
-        GradientDrawable bg = new GradientDrawable(
-                GradientDrawable.Orientation.TL_BR,
-                new int[]{Color.rgb(10, 12, 16), Color.rgb(20, 22, 29), Color.rgb(10, 12, 16)});
-        rootView.setBackground(bg);
-
-        LinearLayout hero = new LinearLayout(this);
-        hero.setOrientation(LinearLayout.VERTICAL);
-        hero.setGravity(Gravity.CENTER);
-        hero.setPadding(dp(20), dp(22), dp(20), dp(22));
-        hero.setBackground(card(Color.rgb(24, 27, 35), 22));
-        LinearLayout.LayoutParams heroLp = new LinearLayout.LayoutParams(-1, -2);
-        heroLp.bottomMargin = dp(20);
-        rootView.addView(hero, heroLp);
-
-        TextView mark = new TextView(this);
-        mark.setText("◎");
-        mark.setTextColor(Color.rgb(242, 159, 5));
-        mark.setTextSize(52);
-        mark.setGravity(Gravity.CENTER);
-        hero.addView(mark, new LinearLayout.LayoutParams(-1, -2));
+        rootView.setGravity(Gravity.TOP);
+        rootView.setPadding(dp(24), dp(58), dp(24), dp(28));
+        rootView.setBackgroundColor(Color.rgb(12, 13, 16));
 
         title = new TextView(this);
-        title.setText("CS2 MOBILE");
+        title.setText("CS2 Mobile");
         title.setTextColor(Color.WHITE);
         title.setTextSize(30);
-        title.setGravity(Gravity.CENTER);
-        title.setLetterSpacing(0.08f);
-        hero.addView(title, new LinearLayout.LayoutParams(-1, -2));
+        title.setGravity(Gravity.START);
+        title.setPadding(dp(2), 0, 0, dp(8));
+        rootView.addView(title, new LinearLayout.LayoutParams(-1, -2));
 
-        TextView subtitle = new TextView(this);
-        subtitle.setText("Steam → Counter-Strike 2 → мобильное управление");
-        subtitle.setTextColor(Color.rgb(145, 153, 167));
-        subtitle.setTextSize(13);
-        subtitle.setGravity(Gravity.CENTER);
-        subtitle.setPadding(0, dp(6), 0, 0);
-        hero.addView(subtitle, new LinearLayout.LayoutParams(-1, -2));
-
-        LinearLayout stageRow = new LinearLayout(this);
-        stageRow.setOrientation(LinearLayout.HORIZONTAL);
-        stageRow.setGravity(Gravity.CENTER_VERTICAL);
-        stageRow.setPadding(dp(4), dp(4), dp(4), dp(12));
-        rootView.addView(stageRow, new LinearLayout.LayoutParams(-1, -2));
-
-        pulseDot = new View(this);
-        GradientDrawable dotBg = new GradientDrawable();
-        dotBg.setShape(GradientDrawable.OVAL);
-        dotBg.setColor(Color.rgb(242, 159, 5));
-        pulseDot.setBackground(dotBg);
-        LinearLayout.LayoutParams dotLp = new LinearLayout.LayoutParams(dp(9), dp(9));
-        dotLp.rightMargin = dp(9);
-        stageRow.addView(pulseDot, dotLp);
-
-        stageText = new TextView(this);
-        stageText.setTextColor(Color.rgb(242, 159, 5));
-        stageText.setTextSize(12);
-        stageText.setLetterSpacing(0.05f);
-        stageRow.addView(stageText, new LinearLayout.LayoutParams(-2, -2));
+        TextView version = new TextView(this);
+        version.setText("0.4.7 alpha");
+        version.setTextColor(Color.rgb(113, 118, 128));
+        version.setTextSize(12);
+        version.setPadding(dp(3), 0, 0, dp(34));
+        rootView.addView(version, new LinearLayout.LayoutParams(-1, -2));
 
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setGravity(Gravity.CENTER);
-        panel.setPadding(dp(20), dp(22), dp(20), dp(22));
-        panel.setBackground(card(Color.rgb(19, 22, 28), 20));
+        panel.setPadding(dp(18), dp(20), dp(18), dp(18));
+        panel.setBackground(card(Color.rgb(22, 24, 29), 16));
         rootView.addView(panel, new LinearLayout.LayoutParams(-1, -2));
 
         status = new TextView(this);
-        status.setTextColor(Color.rgb(205, 210, 218));
-        status.setTextSize(15);
-        status.setGravity(Gravity.CENTER);
-        status.setLineSpacing(0f, 1.08f);
-        status.setPadding(0, 0, 0, dp(20));
+        status.setTextColor(Color.rgb(188, 193, 202));
+        status.setTextSize(14);
+        status.setGravity(Gravity.START);
+        status.setPadding(dp(2), 0, dp(2), dp(18));
         panel.addView(status, new LinearLayout.LayoutParams(-1, -2));
 
         action = new Button(this);
         action.setAllCaps(false);
+        action.setText("Подождите");
         action.setTextSize(16);
-        action.setTextColor(Color.BLACK);
-        action.setText("ПОДГОТОВКА…");
+        action.setTextColor(Color.WHITE);
+        action.setBackgroundTintList(ColorStateList.valueOf(Color.rgb(53, 101, 224)));
         action.setEnabled(false);
-        action.setBackgroundTintList(ColorStateList.valueOf(Color.rgb(242, 159, 5)));
-        LinearLayout.LayoutParams actionLp = new LinearLayout.LayoutParams(-1, dp(56));
-        panel.addView(action, actionLp);
+        panel.addView(action, new LinearLayout.LayoutParams(-1, dp(54)));
 
-        controlsButton = new Button(this);
-        controlsButton.setAllCaps(false);
-        controlsButton.setText("УПРАВЛЕНИЕ");
-        controlsButton.setTextSize(15);
-        controlsButton.setTextColor(Color.WHITE);
-        controlsButton.setBackgroundTintList(ColorStateList.valueOf(Color.rgb(45, 49, 61)));
+        controlsButton = makeButton("Управление");
         controlsButton.setOnClickListener(v -> showControlsSettings());
-        LinearLayout.LayoutParams controlsLp = new LinearLayout.LayoutParams(-1, dp(52));
+        LinearLayout.LayoutParams controlsLp = new LinearLayout.LayoutParams(-1, dp(50));
         controlsLp.topMargin = dp(10);
         panel.addView(controlsButton, controlsLp);
 
-        TextView note = new TextView(this);
-        note.setText("Steam-вход выполняет сам Steam. Игра скачивается из Steam и не входит в APK.");
-        note.setTextColor(Color.rgb(104, 111, 124));
-        note.setTextSize(12);
-        note.setGravity(Gravity.CENTER);
-        note.setPadding(dp(12), dp(18), dp(12), 0);
-        rootView.addView(note, new LinearLayout.LayoutParams(-1, -2));
+        settingsButton = makeButton("Настройки");
+        settingsButton.setOnClickListener(v -> showAppSettings());
+        LinearLayout.LayoutParams settingsLp = new LinearLayout.LayoutParams(-1, dp(50));
+        settingsLp.topMargin = dp(8);
+        panel.addView(settingsButton, settingsLp);
+
+        TextView footer = new TextView(this);
+        footer.setText("CS2 устанавливается через Steam");
+        footer.setTextColor(Color.rgb(88, 93, 103));
+        footer.setTextSize(11);
+        footer.setGravity(Gravity.CENTER);
+        footer.setPadding(0, dp(18), 0, 0);
+        rootView.addView(footer, new LinearLayout.LayoutParams(-1, -2));
 
         setContentView(rootView);
-        startPulse();
+    }
+
+    private Button makeButton(String text) {
+        Button button = new Button(this);
+        button.setAllCaps(false);
+        button.setText(text);
+        button.setTextSize(15);
+        button.setTextColor(Color.WHITE);
+        button.setBackgroundTintList(ColorStateList.valueOf(Color.rgb(41, 44, 52)));
+        return button;
     }
 
     private GradientDrawable card(int color, int radiusDp) {
         GradientDrawable drawable = new GradientDrawable();
         drawable.setColor(color);
         drawable.setCornerRadius(dp(radiusDp));
-        drawable.setStroke(dp(1), Color.rgb(38, 42, 52));
+        drawable.setStroke(dp(1), Color.rgb(35, 38, 45));
         return drawable;
     }
 
-    private void animateEntrance() {
+    private void animateIn() {
         if (rootView == null) return;
+
         rootView.setAlpha(0f);
-        rootView.setTranslationY(dp(18));
+        rootView.setTranslationY(dp(10));
         rootView.animate()
                 .alpha(1f)
                 .translationY(0f)
-                .setDuration(420)
+                .setDuration(260)
                 .start();
 
         if (title != null) {
             title.setAlpha(0f);
-            title.setScaleX(0.92f);
-            title.setScaleY(0.92f);
+            title.setTranslationY(dp(8));
             title.animate()
                     .alpha(1f)
-                    .scaleX(1f)
-                    .scaleY(1f)
-                    .setStartDelay(120)
-                    .setDuration(420)
+                    .translationY(0f)
+                    .setStartDelay(60)
+                    .setDuration(240)
                     .start();
         }
 
         if (action != null) {
             action.setAlpha(0f);
-            action.setTranslationY(dp(20));
-            action.animate().alpha(1f).translationY(0f).setStartDelay(220).setDuration(360).start();
-        }
-
-        if (controlsButton != null) {
-            controlsButton.setAlpha(0f);
-            controlsButton.setTranslationY(dp(20));
-            controlsButton.animate().alpha(1f).translationY(0f).setStartDelay(280).setDuration(360).start();
+            action.animate()
+                    .alpha(1f)
+                    .setStartDelay(120)
+                    .setDuration(220)
+                    .start();
         }
     }
 
-    private void startPulse() {
-        if (pulseDot == null) return;
-        pulseAnimator = ObjectAnimator.ofFloat(pulseDot, View.ALPHA, 0.25f, 1f, 0.25f);
-        pulseAnimator.setDuration(1500);
-        pulseAnimator.setRepeatCount(ValueAnimator.INFINITE);
-        pulseAnimator.start();
-    }
+    private void showAppSettings() {
+        subPageVisible = true;
 
-    private void setStage(String text) {
-        if (stageText != null) {
-            stageText.animate().alpha(0f).setDuration(100).withEndAction(() -> {
-                stageText.setText(text);
-                stageText.animate().alpha(1f).setDuration(180).start();
-            }).start();
-        }
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setGravity(Gravity.TOP);
+        root.setPadding(dp(24), dp(58), dp(24), dp(28));
+        root.setBackgroundColor(Color.rgb(12, 13, 16));
+
+        TextView header = new TextView(this);
+        header.setText("Настройки");
+        header.setTextColor(Color.WHITE);
+        header.setTextSize(28);
+        header.setPadding(dp(2), 0, 0, dp(26));
+        root.addView(header, new LinearLayout.LayoutParams(-1, -2));
+
+        Button permissions = makeButton("Разрешения Android");
+        permissions.setOnClickListener(v -> requestStartupPermissions());
+        root.addView(permissions, new LinearLayout.LayoutParams(-1, dp(52)));
+
+        Button system = makeButton("Настройки приложения");
+        system.setOnClickListener(v -> {
+            Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+            intent.setData(Uri.parse("package:" + getPackageName()));
+            startActivity(intent);
+        });
+        LinearLayout.LayoutParams systemLp = new LinearLayout.LayoutParams(-1, dp(52));
+        systemLp.topMargin = dp(10);
+        root.addView(system, systemLp);
+
+        Button back = makeButton("Назад");
+        back.setOnClickListener(v -> {
+            subPageVisible = false;
+            buildMainUi();
+            animateIn();
+            if (bootstrapStarted) refreshState();
+            else initializeState();
+        });
+        LinearLayout.LayoutParams backLp = new LinearLayout.LayoutParams(-1, dp(52));
+        backLp.topMargin = dp(20);
+        root.addView(back, backLp);
+
+        setContentView(root);
+        root.setAlpha(0f);
+        root.setTranslationY(dp(8));
+        root.animate().alpha(1f).translationY(0f).setDuration(220).start();
     }
 
     private void showControlsSettings() {
-        controlsSettingsVisible = true;
+        subPageVisible = true;
+
         ControlsProfile profile = ensureCs2ControlsProfile();
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setGravity(Gravity.CENTER_HORIZONTAL);
-        root.setPadding(dp(24), dp(34), dp(24), dp(28));
-
-        GradientDrawable bg = new GradientDrawable(
-                GradientDrawable.Orientation.TL_BR,
-                new int[]{Color.rgb(10, 12, 16), Color.rgb(20, 22, 29)});
-        root.setBackground(bg);
+        root.setGravity(Gravity.TOP);
+        root.setPadding(dp(24), dp(58), dp(24), dp(28));
+        root.setBackgroundColor(Color.rgb(12, 13, 16));
 
         TextView header = new TextView(this);
-        header.setText("УПРАВЛЕНИЕ");
+        header.setText("Управление");
         header.setTextColor(Color.WHITE);
-        header.setTextSize(27);
-        header.setGravity(Gravity.CENTER);
-        header.setPadding(0, 0, 0, dp(8));
+        header.setTextSize(28);
+        header.setPadding(dp(2), 0, 0, dp(26));
         root.addView(header, new LinearLayout.LayoutParams(-1, -2));
 
-        TextView hint = new TextView(this);
-        hint.setText("Настрой HUD как в мобильном шутере: позиция, размер, прозрачность и назначение кнопок.");
-        hint.setTextColor(Color.rgb(165, 173, 187));
-        hint.setTextSize(13);
-        hint.setGravity(Gravity.CENTER);
-        hint.setPadding(dp(8), 0, dp(8), dp(22));
-        root.addView(hint, new LinearLayout.LayoutParams(-1, -2));
-
-        LinearLayout panel = new LinearLayout(this);
-        panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(18), dp(18), dp(18), dp(18));
-        panel.setBackground(card(Color.rgb(19, 22, 28), 20));
-        root.addView(panel, new LinearLayout.LayoutParams(-1, -2));
-
         TextView sensitivityLabel = new TextView(this);
-        sensitivityLabel.setTextColor(Color.WHITE);
-        sensitivityLabel.setTextSize(15);
-        panel.addView(sensitivityLabel, new LinearLayout.LayoutParams(-1, -2));
+        sensitivityLabel.setTextColor(Color.rgb(210, 214, 221));
+        sensitivityLabel.setTextSize(14);
+        root.addView(sensitivityLabel, new LinearLayout.LayoutParams(-1, -2));
 
         SeekBar sensitivity = new SeekBar(this);
         sensitivity.setMax(100);
@@ -473,13 +425,13 @@ public class CS2LauncherActivity extends AppCompatActivity {
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
         });
-        panel.addView(sensitivity, new LinearLayout.LayoutParams(-1, -2));
+        root.addView(sensitivity, new LinearLayout.LayoutParams(-1, -2));
 
         TextView opacityLabel = new TextView(this);
-        opacityLabel.setTextColor(Color.WHITE);
-        opacityLabel.setTextSize(15);
+        opacityLabel.setTextColor(Color.rgb(210, 214, 221));
+        opacityLabel.setTextSize(14);
         opacityLabel.setPadding(0, dp(14), 0, 0);
-        panel.addView(opacityLabel, new LinearLayout.LayoutParams(-1, -2));
+        root.addView(opacityLabel, new LinearLayout.LayoutParams(-1, -2));
 
         SeekBar opacity = new SeekBar(this);
         opacity.setMax(100);
@@ -496,9 +448,9 @@ public class CS2LauncherActivity extends AppCompatActivity {
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
         });
-        panel.addView(opacity, new LinearLayout.LayoutParams(-1, -2));
+        root.addView(opacity, new LinearLayout.LayoutParams(-1, -2));
 
-        Button editor = makeSecondaryButton("РЕДАКТОР HUD");
+        Button editor = makeButton("Редактор HUD");
         editor.setEnabled(profile != null);
         editor.setOnClickListener(v -> {
             ControlsProfile latest = ensureCs2ControlsProfile();
@@ -507,49 +459,40 @@ public class CS2LauncherActivity extends AppCompatActivity {
             intent.putExtra("profile_id", latest.id);
             startActivity(intent);
         });
-        LinearLayout.LayoutParams editorLp = new LinearLayout.LayoutParams(-1, dp(54));
+        LinearLayout.LayoutParams editorLp = new LinearLayout.LayoutParams(-1, dp(52));
         editorLp.topMargin = dp(18);
-        panel.addView(editor, editorLp);
+        root.addView(editor, editorLp);
 
-        Button reset = makeSecondaryButton("СБРОСИТЬ РАСКЛАДКУ");
+        Button reset = makeButton("Сбросить раскладку");
         reset.setOnClickListener(v -> {
             resetCs2ControlsProfile();
             prefs.edit().putFloat(PREF_OVERLAY_OPACITY, 0.65f).apply();
             showControlsSettings();
         });
-        LinearLayout.LayoutParams resetLp = new LinearLayout.LayoutParams(-1, dp(50));
+        LinearLayout.LayoutParams resetLp = new LinearLayout.LayoutParams(-1, dp(52));
         resetLp.topMargin = dp(10);
-        panel.addView(reset, resetLp);
+        root.addView(reset, resetLp);
 
-        Button back = makeSecondaryButton("НАЗАД");
+        Button back = makeButton("Назад");
         back.setOnClickListener(v -> {
-            controlsSettingsVisible = false;
-            buildUi();
-            animateEntrance();
-            refreshState();
+            subPageVisible = false;
+            buildMainUi();
+            animateIn();
+            if (bootstrapStarted) refreshState();
+            else initializeState();
         });
-        LinearLayout.LayoutParams backLp = new LinearLayout.LayoutParams(-1, dp(50));
-        backLp.topMargin = dp(10);
-        panel.addView(back, backLp);
+        LinearLayout.LayoutParams backLp = new LinearLayout.LayoutParams(-1, dp(52));
+        backLp.topMargin = dp(20);
+        root.addView(back, backLp);
 
         setContentView(root);
         root.setAlpha(0f);
-        root.setTranslationY(dp(16));
-        root.animate().alpha(1f).translationY(0f).setDuration(330).start();
-    }
-
-    private Button makeSecondaryButton(String text) {
-        Button button = new Button(this);
-        button.setAllCaps(false);
-        button.setText(text);
-        button.setTextSize(15);
-        button.setTextColor(Color.WHITE);
-        button.setBackgroundTintList(ColorStateList.valueOf(Color.rgb(45, 49, 61)));
-        return button;
+        root.setTranslationY(dp(8));
+        root.animate().alpha(1f).translationY(0f).setDuration(220).start();
     }
 
     private void updateSensitivityLabel(TextView label, float speed) {
-        label.setText(String.format(java.util.Locale.US, "Чувствительность камеры: %.2fx", speed));
+        label.setText(String.format(java.util.Locale.US, "Чувствительность: %.2fx", speed));
     }
 
     private void updateOpacityLabel(TextView label, int value) {
@@ -571,6 +514,7 @@ public class CS2LauncherActivity extends AppCompatActivity {
 
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
         int savedId = prefs.getInt(PREF_PROFILE_ID, 0);
+
         if (savedId > 0) {
             ControlsProfile saved = manager.getProfile(savedId);
             if (saved != null && CS2_PROFILE_NAME.equals(saved.getName())) return saved;
@@ -589,6 +533,7 @@ public class CS2LauncherActivity extends AppCompatActivity {
         ControlsProfile custom = manager.duplicateProfile(fps);
         custom.setName(CS2_PROFILE_NAME);
         custom.save();
+
         prefs.edit().putInt(PREF_PROFILE_ID, custom.id).apply();
         return custom;
     }
@@ -606,13 +551,12 @@ public class CS2LauncherActivity extends AppCompatActivity {
     }
 
     private void refreshState() {
-        if (controlsSettingsVisible) return;
+        if (subPageVisible) return;
 
         try {
             refreshStateInternal();
         } catch (Throwable t) {
-            setStage("ОШИБКА");
-            setState("Ошибка запуска: " + safeMessage(t), "ПОВТОРИТЬ", true, this::retryBootstrap);
+            setState("Ошибка запуска: " + safeMessage(t), "Повторить", true, this::retryBootstrap);
         }
     }
 
@@ -620,9 +564,8 @@ public class CS2LauncherActivity extends AppCompatActivity {
         File bootstrapError = new File(getFilesDir(), "bootstrap-error.txt");
         if (bootstrapError.isFile()) {
             String error = FileUtils.readString(bootstrapError);
-            if (error == null || error.trim().isEmpty()) error = "неизвестная ошибка runtime";
-            setStage("ОШИБКА RUNTIME");
-            setState("Ошибка подготовки: " + error.trim(), "ПОВТОРИТЬ", true, () -> {
+            if (error == null || error.trim().isEmpty()) error = "ошибка runtime";
+            setState("Ошибка: " + error.trim(), "Повторить", true, () -> {
                 bootstrapError.delete();
                 retryBootstrap();
             });
@@ -631,9 +574,8 @@ public class CS2LauncherActivity extends AppCompatActivity {
 
         RootFS rootFS = RootFS.find(this);
         if (!rootFS.isValid()) {
-            setStage("ПОДГОТОВКА RUNTIME");
-            setState("Распаковываем игровое окружение…", "ПОДОЖДАТЬ", false, null);
-            handler.postDelayed(this::refreshState, 1200);
+            setState("Подготовка окружения…", "Подождите", false, null);
+            handler.postDelayed(this::refreshState, 1000);
             return;
         }
 
@@ -642,41 +584,36 @@ public class CS2LauncherActivity extends AppCompatActivity {
         if (container == null) {
             ContainerManager manager = new ContainerManager(this);
             ArrayList<Container> containers = manager.getContainers();
+
             if (!containers.isEmpty()) {
                 container = containers.get(0);
             } else if (!creatingContainer) {
                 creatingContainer = true;
-                setStage("СОЗДАНИЕ КОНТЕЙНЕРА");
-                setState("Создаём окружение CS2…", "ПОДОЖДАТЬ", false, null);
+                setState("Создание окружения…", "Подождите", false, null);
                 createCs2Container(manager);
                 return;
             } else {
-                handler.postDelayed(this::refreshState, 800);
+                handler.postDelayed(this::refreshState, 700);
                 return;
             }
         }
 
         ensureLauncherBats();
+
         File steam = steamExe();
         if (!steam.exists()) {
-            setStage("STEAM");
-            setState("Окружение готово. Теперь установим Steam внутри приложения.",
-                    "УСТАНОВИТЬ STEAM", true,
+            setState("Steam не установлен", "Установить Steam", true,
                     () -> launchBat("install_steam.bat", "", false));
             return;
         }
 
         if (!cs2Manifest().exists()) {
-            setStage("STEAM ГОТОВ");
-            setState("Войди в Steam и установи Counter-Strike 2 (AppID 730).",
-                    "ОТКРЫТЬ STEAM", true,
+            setState("CS2 не установлена", "Открыть Steam", true,
                     () -> launch(steam, "", false));
             return;
         }
 
-        setStage("ГОТОВО К ИГРЕ");
-        setState("CS2 установлен. При запуске экран перейдёт в горизонтальный игровой режим.",
-                "ИГРАТЬ", true,
+        setState("Готово", "Запустить CS2", true,
                 () -> launch(steam, "-silent -applaunch 730 -novid -fullscreen +fps_max 30", true));
     }
 
@@ -697,29 +634,34 @@ public class CS2LauncherActivity extends AppCompatActivity {
             data.put("hudMode", 0);
             data.put("startupSelection", Container.STARTUP_SELECTION_ESSENTIAL);
             data.put("box64Preset", "PERFORMANCE");
-            data.put("desktopTheme", "LIGHT,IMAGE,#0277bd");
+            data.put("desktopTheme", "DARK,COLOR,#0c0d10");
+
             manager.createContainerAsync(data, created -> {
                 creatingContainer = false;
+
                 if (created == null) {
-                    setStage("ОШИБКА");
-                    setState("Не удалось создать контейнер CS2.", "ПОВТОРИТЬ", true, this::refreshState);
+                    setState("Не удалось создать окружение", "Повторить", true, this::refreshState);
                     return;
                 }
+
                 container = created;
                 runOnUiThread(this::refreshState);
             });
         } catch (Exception e) {
             creatingContainer = false;
-            setStage("ОШИБКА");
-            setState("Не удалось создать окружение: " + e.getMessage(), "ПОВТОРИТЬ", true, this::refreshState);
+            setState("Ошибка: " + safeMessage(e), "Повторить", true, this::refreshState);
         }
     }
 
     private void ensureLauncherBats() {
         File c = new File(container.getRootDir(), ".wine/drive_c");
         File install = new File(c, "install_steam.bat");
+
         if (!install.exists()) {
-            write(install, "@echo off\r\nZ:\\opt\\apps\\winaddons.exe -n \"Steam (Legacy)\" -d \"Steam\" -e \"steam.exe\"\r\n");
+            write(
+                    install,
+                    "@echo off\r\nZ:\\opt\\apps\\winaddons.exe -n \"Steam (Legacy)\" -d \"Steam\" -e \"steam.exe\"\r\n"
+            );
         }
     }
 
@@ -729,25 +671,30 @@ public class CS2LauncherActivity extends AppCompatActivity {
     }
 
     private void launch(File exe, String args, boolean controls) {
-        setStage(controls ? "ЗАПУСК CS2" : "ЗАПУСК STEAM");
-        setState(controls ? "Запускаем Counter-Strike 2…" : "Открываем Steam…", "ЗАПУСК…", false, null);
+        setState(controls ? "Запуск CS2…" : "Запуск Steam…", "Запуск…", false, null);
 
         Intent i = new Intent(this, XServerDisplayActivity.class);
         i.putExtra("container_id", container.id);
         i.putExtra("exec_path", exe.getAbsolutePath());
-        if (args != null && !args.isEmpty()) i.putExtra("exec_args", args);
+
+        if (args != null && !args.isEmpty()) {
+            i.putExtra("exec_args", args);
+        }
+
         if (controls) {
             ControlsProfile profile = ensureCs2ControlsProfile();
-            if (profile != null) i.putExtra("controls_profile_id", profile.id);
+            if (profile != null) {
+                i.putExtra("controls_profile_id", profile.id);
+            }
         }
 
         Runnable start = () -> startActivity(i);
+
         if (rootView != null) {
             rootView.animate()
                     .alpha(0f)
-                    .scaleX(0.985f)
-                    .scaleY(0.985f)
-                    .setDuration(220)
+                    .translationY(dp(6))
+                    .setDuration(180)
                     .withEndAction(start)
                     .start();
         } else {
@@ -770,14 +717,18 @@ public class CS2LauncherActivity extends AppCompatActivity {
         runOnUiThread(() -> {
             if (status == null || action == null) return;
 
-            status.animate().alpha(0f).setDuration(90).withEndAction(() -> {
-                status.setText(text);
-                status.animate().alpha(1f).setDuration(180).start();
-            }).start();
+            status.animate()
+                    .alpha(0f)
+                    .setDuration(80)
+                    .withEndAction(() -> {
+                        status.setText(text);
+                        status.animate().alpha(1f).setDuration(140).start();
+                    })
+                    .start();
 
             action.setText(buttonText);
             action.setEnabled(enabled);
-            action.setAlpha(enabled ? 1f : 0.62f);
+            action.setAlpha(enabled ? 1f : 0.58f);
             action.setOnClickListener(v -> {
                 if (callback != null) callback.run();
             });
@@ -792,7 +743,10 @@ public class CS2LauncherActivity extends AppCompatActivity {
     private static void write(File file, String data) {
         try {
             file.getParentFile().mkdirs();
-            java.nio.file.Files.write(file.toPath(), data.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            java.nio.file.Files.write(
+                    file.toPath(),
+                    data.getBytes(java.nio.charset.StandardCharsets.UTF_8)
+            );
         } catch (Exception ignored) {}
     }
 
