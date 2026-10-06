@@ -14,8 +14,8 @@ drawable_dir = root / "app/src/main/res/drawable"
 gradle = root / "app/build.gradle"
 s = gradle.read_text(encoding="utf-8")
 s = s.replace("applicationId 'com.winlator'", "applicationId 'com.reverfyx.cs2mobile'")
-s = s.replace('versionCode 33', 'versionCode 42')
-s = s.replace('versionName "11.2"', 'versionName "0.4.2-alpha"')
+s = s.replace('versionCode 33', 'versionCode 43')
+s = s.replace('versionName "11.2"', 'versionName "0.4.3-alpha"')
 gradle.write_text(s, encoding="utf-8")
 
 # Replace Winlator branding in every localized string table so Android cannot pick an old localized app name.
@@ -109,4 +109,113 @@ rfi = java_dir / "xenvironment/RootFSInstaller.java"
 rs = rfi.read_text(encoding="utf-8")
 rs = rs.replace("public static void install(final MainActivity activity)", "public static void install(final AppCompatActivity activity)")
 rs = rs.replace("public static void installIfNeeded(final MainActivity activity)", "public static void installIfNeeded(final AppCompatActivity activity)")
+rfi.write_text(rs, encoding="utf-8")
+
+
+# The upstream runtime hardcodes its original applicationId in a few filesystem/socket paths.
+# Our APK uses com.reverfyx.cs2mobile, so all runtime paths must follow that package.
+runtime_path_files = [
+    root / "app/src/main/java/com/winlator/core/AppUtils.java",
+    root / "app/src/main/cpp/winlator/include/winlator.h",
+    root / "app/src/main/cpp/vortekrenderer/include/vortek.h",
+    root / "app/src/main/cpp/gladiorenderer/include/gladio.h",
+]
+for path in runtime_path_files:
+    data = path.read_text(encoding="utf-8")
+    data = data.replace("/data/data/com.winlator", "/data/data/com.reverfyx.cs2mobile")
+    path.write_text(data, encoding="utf-8")
+
+file_utils = java_dir / "core/FileUtils.java"
+fu = file_utils.read_text(encoding="utf-8")
+fu = fu.replace('"com.winlator.FileProvider"', '"com.reverfyx.cs2mobile.FileProvider"')
+file_utils.write_text(fu, encoding="utf-8")
+
+# A previous interrupted first launch may leave an empty/corrupt .rfs_version file.
+# Treat it as version 0 instead of throwing IndexOutOfBounds/NumberFormatException.
+rootfs_file = java_dir / "xenvironment/RootFS.java"
+rf = rootfs_file.read_text(encoding="utf-8")
+old_get_version = '''    public int getVersion() {
+        File rfsVersionFile = getRFSVersionFile();
+        return rfsVersionFile.exists() ? Integer.parseInt(FileUtils.readLines(rfsVersionFile).get(0)) : 0;
+    }'''
+new_get_version = '''    public int getVersion() {
+        File rfsVersionFile = getRFSVersionFile();
+        if (!rfsVersionFile.exists()) return 0;
+        try {
+            java.util.ArrayList<String> lines = FileUtils.readLines(rfsVersionFile, true);
+            if (lines.isEmpty()) return 0;
+            return Integer.parseInt(lines.get(0).trim());
+        }
+        catch (Throwable t) {
+            return 0;
+        }
+    }'''
+if old_get_version not in rf:
+    raise SystemExit("RootFS.getVersion patch seam not found")
+rf = rf.replace(old_get_version, new_get_version, 1)
+rootfs_file.write_text(rf, encoding="utf-8")
+
+# Do not kill the Android process if rootfs extraction fails on a worker thread.
+rfi = java_dir / "xenvironment/RootFSInstaller.java"
+rs = rfi.read_text(encoding="utf-8")
+old_worker = '''        Executors.newSingleThreadExecutor().execute(() -> {
+            clearRootDir(rootDir);
+            final long contentLength = TarCompressorUtils.getContentLength(TarCompressorUtils.Type.ZSTD, activity, FILENAME, rootDir);
+            AtomicLong totalSizeRef = new AtomicLong();
+
+            boolean success = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, activity, FILENAME, rootDir, (file, size) -> {
+                if (size > 0) {
+                    long totalSize = totalSizeRef.addAndGet(size);
+                    final int progress = (int)(((float)totalSize / contentLength) * 100);
+                    activity.runOnUiThread(() -> dialog.setProgress(progress));
+                }
+                return file;
+            });
+
+            if (success) {
+                rootFS.createRFSVersionFile(LATEST_VERSION);
+                resetContainerRFSVersions(activity);
+            }
+            else AppUtils.showToast(activity, R.string.unable_to_install_system_files);
+
+            dialog.closeOnUiThread();
+        });'''
+new_worker = '''        Executors.newSingleThreadExecutor().execute(() -> {
+            File errorFile = new File(activity.getFilesDir(), "bootstrap-error.txt");
+            errorFile.delete();
+            try {
+                clearRootDir(rootDir);
+                final long contentLength = TarCompressorUtils.getContentLength(TarCompressorUtils.Type.ZSTD, activity, FILENAME, rootDir);
+                AtomicLong totalSizeRef = new AtomicLong();
+
+                boolean success = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, activity, FILENAME, rootDir, (file, size) -> {
+                    if (size > 0 && contentLength > 0) {
+                        long totalSize = totalSizeRef.addAndGet(size);
+                        final int progress = (int)(((float)totalSize / contentLength) * 100);
+                        activity.runOnUiThread(() -> dialog.setProgress(progress));
+                    }
+                    return file;
+                });
+
+                if (success) {
+                    rootFS.createRFSVersionFile(LATEST_VERSION);
+                    resetContainerRFSVersions(activity);
+                }
+                else {
+                    FileUtils.writeString(errorFile, "Не удалось распаковать системные файлы");
+                    AppUtils.showToast(activity, R.string.unable_to_install_system_files);
+                }
+            }
+            catch (Throwable t) {
+                String message = t.getMessage();
+                if (message == null || message.isEmpty()) message = t.getClass().getSimpleName();
+                FileUtils.writeString(errorFile, t.getClass().getSimpleName()+": "+message);
+            }
+            finally {
+                dialog.closeOnUiThread();
+            }
+        });'''
+if old_worker not in rs:
+    raise SystemExit("RootFSInstaller worker patch seam not found")
+rs = rs.replace(old_worker, new_worker, 1)
 rfi.write_text(rs, encoding="utf-8")
