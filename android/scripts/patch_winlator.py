@@ -11,8 +11,8 @@ java_dir = root / "app/src/main/java/com/winlator"
 gradle = root / "app/build.gradle"
 s = gradle.read_text(encoding="utf-8")
 s = s.replace("applicationId 'com.winlator'", "applicationId 'com.reverfyx.cs2mobile'")
-s = s.replace('versionCode 33', 'versionCode 40')
-s = s.replace('versionName "11.2"', 'versionName "0.4.0-alpha"')
+s = s.replace('versionCode 33', 'versionCode 41')
+s = s.replace('versionName "11.2"', 'versionName "0.4.1-alpha"')
 gradle.write_text(s, encoding="utf-8")
 
 strings = root / "app/src/main/res/values/strings.xml"
@@ -46,7 +46,7 @@ s = s.replace('        <activity android:name="com.winlator.XServerDisplayActivi
 s = s.replace('android:authorities="com.winlator.FileProvider"', 'android:authorities="com.reverfyx.cs2mobile.FileProvider"')
 manifest.write_text(s, encoding="utf-8")
 
-# Let the single-purpose launcher pass command-line arguments and force the bundled FPS touch profile.
+# Let the single-purpose launcher pass command-line arguments and force the selected touch profile.
 xfile = java_dir / "XServerDisplayActivity.java"
 x = xfile.read_text(encoding="utf-8")
 old = '''            if (intent.hasExtra("exec_path")) {
