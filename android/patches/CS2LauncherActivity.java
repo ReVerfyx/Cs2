@@ -56,6 +56,7 @@ public class CS2LauncherActivity extends AppCompatActivity {
         AppUtils.keepScreenOn(this);
 
         buildUi();
+        setState("Подготовка игрового окружения…", "ПОДГОТОВКА…", false, null);
 
         try {
             RootFSInstaller.installIfNeeded(this);
@@ -132,6 +133,8 @@ public class CS2LauncherActivity extends AppCompatActivity {
         action = new Button(this);
         action.setAllCaps(false);
         action.setTextSize(17);
+        action.setText("ПОДГОТОВКА…");
+        action.setEnabled(false);
         LinearLayout.LayoutParams actionLp = new LinearLayout.LayoutParams(dp(280), dp(58));
         root.addView(action, actionLp);
 
@@ -331,6 +334,27 @@ public class CS2LauncherActivity extends AppCompatActivity {
 
     private void refreshState() {
         if (controlsSettingsVisible) return;
+
+        try {
+            refreshStateInternal();
+        } catch (Throwable t) {
+            String msg = t.getMessage();
+            if (msg == null || msg.isEmpty()) msg = t.getClass().getSimpleName();
+            setState("Ошибка запуска: " + msg, "ПОВТОРИТЬ", true, this::retryBootstrap);
+        }
+    }
+
+    private void refreshStateInternal() {
+        File bootstrapError = new File(getFilesDir(), "bootstrap-error.txt");
+        if (bootstrapError.isFile()) {
+            String error = FileUtils.readString(bootstrapError);
+            if (error == null || error.trim().isEmpty()) error = "неизвестная ошибка runtime";
+            setState("Ошибка подготовки: " + error.trim(), "ПОВТОРИТЬ", true, () -> {
+                bootstrapError.delete();
+                retryBootstrap();
+            });
+            return;
+        }
 
         RootFS rootFS = RootFS.find(this);
         if (!rootFS.isValid()) {
