@@ -71,5 +71,5 @@ jobs:
           else
             gh release create "$TAG" CS2-Mobile-v0.4.6-alpha.apk CS2-Mobile-v0.4.6-alpha.sha256 \
               --title 'CS2 Mobile v0.4.6 alpha' \
-              --notes 'Polishes the first-launch setup and upgrade path: launcher stays in normal sensor orientation, requests storage only on legacy Android, microphone for CS2 voice chat and notifications where applicable, then prepares the runtime. Existing installs are also prompted for newly missing permissions. Landscape starts only when Steam/CS2 opens. Includes animated CS2 Mobile UI and customizable touch HUD.'
+              --notes 'Minimal portrait launcher redesign. Removes decorative icons, stage labels and marketing text. Main screen now shows only CS2 Mobile, status, Launch, Controls and Settings. Launcher is forced portrait; only Steam/CS2 runtime uses landscape. Keeps permission onboarding, runtime/bootstrap fixes and customizable touch HUD.'
           fi
