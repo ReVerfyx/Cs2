@@ -27,6 +27,9 @@ for strings in (root / "app/src/main/res").glob("values*/strings.xml"):
 
 manifest = root / "app/src/main/AndroidManifest.xml"
 s = manifest.read_text(encoding="utf-8")
+if 'android.permission.RECORD_AUDIO' not in s:
+    s = s.replace('<uses-permission android:name="android.permission.VIBRATE"/>',
+                  '<uses-permission android:name="android.permission.VIBRATE"/>\\n    <uses-permission android:name="android.permission.RECORD_AUDIO"/>')
 # Remove launcher intent-filter from upstream MainActivity, then add dedicated launcher activity.
 main_pattern = re.compile(r'(\s*<activity android:name="com\.winlator\.MainActivity".*?</activity>)', re.S)
 m = main_pattern.search(s)
@@ -39,7 +42,7 @@ launcher_block = '''
         <activity android:name="com.winlator.CS2LauncherActivity"
             android:theme="@style/AppThemeFullscreenDark"
             android:exported="true"
-            android:screenOrientation="sensorLandscape"
+            android:screenOrientation="sensor"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|density|navigation">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
