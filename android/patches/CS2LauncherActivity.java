@@ -1,5 +1,6 @@
 package com.winlator;
 
+import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
@@ -13,6 +14,7 @@ import android.widget.LinearLayout;
 import android.widget.SeekBar;
 import android.widget.TextView;
 
+import androidx.appcompat.app.AppCompatActivity;
 import androidx.preference.PreferenceManager;
 
 import com.winlator.container.Container;
@@ -20,9 +22,11 @@ import com.winlator.container.ContainerManager;
 import com.winlator.container.GraphicsDrivers;
 import com.winlator.core.AppUtils;
 import com.winlator.core.FileUtils;
+import com.winlator.core.LocaleHelper;
 import com.winlator.inputcontrols.ControlsProfile;
 import com.winlator.inputcontrols.InputControlsManager;
 import com.winlator.xenvironment.RootFS;
+import com.winlator.xenvironment.RootFSInstaller;
 
 import org.json.JSONObject;
 
@@ -30,7 +34,7 @@ import java.io.File;
 import java.util.ArrayList;
 
 /** Single-purpose launcher: Steam bootstrap -> Counter-Strike 2 (AppID 730). */
-public class CS2LauncherActivity extends MainActivity {
+public class CS2LauncherActivity extends AppCompatActivity {
     private static final String CS2_PROFILE_NAME = "CS2 Mobile";
     private static final String PREF_PROFILE_ID = "cs2_controls_profile_id";
     private static final String PREF_OVERLAY_OPACITY = "overlay_opacity";
@@ -46,16 +50,39 @@ public class CS2LauncherActivity extends MainActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        AppUtils.setActivityTheme(this);
         super.onCreate(savedInstanceState);
         AppUtils.hideSystemUI(this);
+        AppUtils.keepScreenOn(this);
+
         buildUi();
-        handler.post(this::refreshState);
+
+        try {
+            RootFSInstaller.installIfNeeded(this);
+        } catch (Throwable t) {
+            setState("Ошибка подготовки окружения: " + t.getClass().getSimpleName(), "ПОВТОРИТЬ", true, this::retryBootstrap);
+            return;
+        }
+
+        handler.postDelayed(this::refreshState, 400);
+    }
+
+    @Override
+    protected void attachBaseContext(Context newBase) {
+        super.attachBaseContext(LocaleHelper.setSystemLocale(newBase));
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        AppUtils.hideSystemUI(this);
         if (!controlsSettingsVisible && status != null) handler.postDelayed(this::refreshState, 500);
+    }
+
+    @Override
+    protected void onDestroy() {
+        handler.removeCallbacksAndMessages(null);
+        super.onDestroy();
     }
 
     @Override
@@ -69,6 +96,15 @@ public class CS2LauncherActivity extends MainActivity {
         super.onBackPressed();
     }
 
+    private void retryBootstrap() {
+        try {
+            RootFSInstaller.installIfNeeded(this);
+            handler.postDelayed(this::refreshState, 700);
+        } catch (Throwable t) {
+            setState("Ошибка подготовки окружения: " + t.getClass().getSimpleName(), "ПОВТОРИТЬ", true, this::retryBootstrap);
+        }
+    }
+
     private void buildUi() {
         controlsSettingsVisible = false;
 
@@ -79,9 +115,9 @@ public class CS2LauncherActivity extends MainActivity {
         root.setBackgroundColor(Color.rgb(12, 14, 18));
 
         title = new TextView(this);
-        title.setText("COUNTER-STRIKE 2");
+        title.setText("CS2 MOBILE");
         title.setTextColor(Color.WHITE);
-        title.setTextSize(28);
+        title.setTextSize(30);
         title.setGravity(Gravity.CENTER);
         title.setPadding(0, 0, 0, dp(16));
         root.addView(title, new LinearLayout.LayoutParams(-1, -2));
@@ -109,7 +145,7 @@ public class CS2LauncherActivity extends MainActivity {
         root.addView(controlsButton, controlsLp);
 
         TextView note = new TextView(this);
-        note.setText("Steam авторизация выполняется самим Steam. Игра скачивается из Steam и не входит в APK.");
+        note.setText("Steam-вход выполняет сам Steam. CS2 скачивается из Steam и не входит в APK.");
         note.setTextColor(Color.rgb(115, 123, 136));
         note.setTextSize(12);
         note.setGravity(Gravity.CENTER);
@@ -138,7 +174,7 @@ public class CS2LauncherActivity extends MainActivity {
         root.addView(header, new LinearLayout.LayoutParams(-1, -2));
 
         TextView hint = new TextView(this);
-        hint.setText("Настрой как в мобильном шутере: перетаскивай кнопки, меняй их размер, прозрачность и назначение.");
+        hint.setText("Перетаскивай кнопки, меняй размер, прозрачность и назначение.");
         hint.setTextColor(Color.rgb(170, 177, 188));
         hint.setTextSize(13);
         hint.setGravity(Gravity.CENTER);
@@ -208,14 +244,6 @@ public class CS2LauncherActivity extends MainActivity {
         LinearLayout.LayoutParams editorLp = new LinearLayout.LayoutParams(dp(300), dp(56));
         editorLp.topMargin = dp(22);
         root.addView(editor, editorLp);
-
-        TextView editorHint = new TextView(this);
-        editorHint.setText("В редакторе: зажми кнопку и тащи. Через настройки элемента меняются размер, прозрачность, действие и подпись.");
-        editorHint.setTextColor(Color.rgb(125, 133, 146));
-        editorHint.setTextSize(12);
-        editorHint.setGravity(Gravity.CENTER);
-        editorHint.setPadding(0, dp(8), 0, 0);
-        root.addView(editorHint, new LinearLayout.LayoutParams(-1, -2));
 
         Button reset = new Button(this);
         reset.setAllCaps(false);
@@ -414,6 +442,7 @@ public class CS2LauncherActivity extends MainActivity {
 
     private void setState(String text, String buttonText, boolean enabled, Runnable callback) {
         runOnUiThread(() -> {
+            if (status == null || action == null) return;
             status.setText(text);
             action.setText(buttonText);
             action.setEnabled(enabled);
