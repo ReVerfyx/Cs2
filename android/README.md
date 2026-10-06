@@ -10,3 +10,5 @@ Runtime base is pinned to `brunodev85/winlator-app` commit `3981d86efa4f333b2a34
 
 
 Current Android alpha: 0.4.4. First-run setup now requests Android permissions before preparing the runtime; the launcher keeps normal sensor orientation until Steam/CS2 starts.
+
+0.4.6: upgrade-safe permission onboarding; normal launcher orientation; landscape only for Steam/CS2.
