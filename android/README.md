@@ -7,3 +7,6 @@ Flow: first launch prepares the runtime -> install Steam -> sign in -> install C
 The APK does **not** bundle Counter-Strike 2, Steam credentials, or Valve game assets. Steam handles authentication and game delivery.
 
 Runtime base is pinned to `brunodev85/winlator-app` commit `3981d86efa4f333b2a34a7da8b6521476cd8c8b9` (Winlator 11.2 source line). Keep upstream LGPL notices and source availability when redistributing binaries.
+
+
+Current Android alpha: 0.4.4. First-run setup now requests Android permissions before preparing the runtime; the launcher keeps normal sensor orientation until Steam/CS2 starts.
