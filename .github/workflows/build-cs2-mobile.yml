@@ -50,26 +50,26 @@ jobs:
 
       - name: Prepare release asset
         run: |
-          cp winlator-src/app/build/outputs/apk/debug/app-debug.apk CS2-Mobile-v0.4.1-alpha.apk
-          sha256sum CS2-Mobile-v0.4.1-alpha.apk > CS2-Mobile-v0.4.1-alpha.sha256
+          cp winlator-src/app/build/outputs/apk/debug/app-debug.apk CS2-Mobile-v0.4.2-alpha.apk
+          sha256sum CS2-Mobile-v0.4.2-alpha.apk > CS2-Mobile-v0.4.2-alpha.sha256
 
       - name: Upload Actions artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CS2-Mobile-v0.4.1-alpha
+          name: CS2-Mobile-v0.4.2-alpha
           path: |
-            CS2-Mobile-v0.4.1-alpha.apk
-            CS2-Mobile-v0.4.1-alpha.sha256
+            CS2-Mobile-v0.4.2-alpha.apk
+            CS2-Mobile-v0.4.2-alpha.sha256
 
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG='v0.4.1-alpha'
+          TAG='v0.4.2-alpha'
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" CS2-Mobile-v0.4.1-alpha.apk CS2-Mobile-v0.4.1-alpha.sha256 --clobber
+            gh release upload "$TAG" CS2-Mobile-v0.4.2-alpha.apk CS2-Mobile-v0.4.2-alpha.sha256 --clobber
           else
-            gh release create "$TAG" CS2-Mobile-v0.4.1-alpha.apk CS2-Mobile-v0.4.1-alpha.sha256 \
-              --title 'CS2 Mobile v0.4.1 alpha' \
-              --notes 'Adds customizable mobile controls: persistent CS2 HUD profile, drag-and-drop HUD editor, per-button size/opacity/bindings through the editor, camera sensitivity slider, global HUD opacity slider, and reset-to-default. CS2 itself is not bundled.'
+            gh release create "$TAG" CS2-Mobile-v0.4.2-alpha.apk CS2-Mobile-v0.4.2-alpha.sha256 \
+              --title 'CS2 Mobile v0.4.2 alpha' \
+              --notes 'Fixes startup crash by separating the CS2 launcher from Winlator MainActivity. Rebrands app label/notification strings and launcher icon to CS2 Mobile. Keeps customizable mobile HUD controls. CS2 itself is not bundled.'
           fi
