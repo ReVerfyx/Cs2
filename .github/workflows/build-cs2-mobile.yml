@@ -71,5 +71,5 @@ jobs:
           else
             gh release create "$TAG" CS2-Mobile-v0.4.3-alpha.apk CS2-Mobile-v0.4.3-alpha.sha256 \
               --title 'CS2 Mobile v0.4.3 alpha' \
-              --notes 'Adds a Winlator-style first-launch setup flow, runtime permission gating, portrait/sensor launcher orientation, animated CS2 Mobile UI and smooth transition into the landscape Steam/CS2 runtime. Keeps runtime path/bootstrap fixes and customizable mobile HUD controls. CS2 itself is not bundled.'
+              --notes 'Adds explicit first-run setup: normal launcher orientation, Android notification/microphone permission flow, animated setup UI, and delayed runtime initialization. Landscape starts only with Steam/CS2. Keeps runtime path/bootstrap fixes and customizable mobile HUD controls. CS2 itself is not bundled.'
           fi
