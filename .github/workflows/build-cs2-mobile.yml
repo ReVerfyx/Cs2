@@ -71,5 +71,5 @@ jobs:
           else
             gh release create "$TAG" CS2-Mobile-v0.4.3-alpha.apk CS2-Mobile-v0.4.3-alpha.sha256 \
               --title 'CS2 Mobile v0.4.3 alpha' \
-              --notes 'Fixes runtime paths for the custom package ID, hardens rootfs version parsing and extraction, and reports bootstrap errors on-screen instead of terminating the app. Keeps CS2 Mobile branding and customizable mobile HUD controls. CS2 itself is not bundled.'
+              --notes 'Adds a Winlator-style first-launch setup flow, runtime permission gating, portrait/sensor launcher orientation, animated CS2 Mobile UI and smooth transition into the landscape Steam/CS2 runtime. Keeps runtime path/bootstrap fixes and customizable mobile HUD controls. CS2 itself is not bundled.'
           fi
