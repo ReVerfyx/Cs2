@@ -15,9 +15,11 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
       - name: Install Android native toolchain
-        run: yes | sdkmanager 'ndk;29.0.14206865' 'cmake;3.22.1' 'platforms;android-35' 'platforms;android-36' 'build-tools;35.0.0' 'build-tools;36.0.0'
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'ndk;29.0.14206865' 'cmake;3.22.1' 'platforms;android-35' 'platforms;android-36' 'build-tools;35.0.0' 'build-tools;36.0.0'
       - name: Unpack CS16 Mobile source
         run: unzip -q cs16-mobile-source.zip
       - name: Build APK
