@@ -1,6 +1,7 @@
 package com.winlator;
 
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.os.Handler;
@@ -9,12 +10,18 @@ import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
+import android.widget.SeekBar;
 import android.widget.TextView;
+
+import androidx.preference.PreferenceManager;
 
 import com.winlator.container.Container;
 import com.winlator.container.ContainerManager;
 import com.winlator.container.GraphicsDrivers;
 import com.winlator.core.AppUtils;
+import com.winlator.core.FileUtils;
+import com.winlator.inputcontrols.ControlsProfile;
+import com.winlator.inputcontrols.InputControlsManager;
 import com.winlator.xenvironment.RootFS;
 
 import org.json.JSONObject;
@@ -24,12 +31,18 @@ import java.util.ArrayList;
 
 /** Single-purpose launcher: Steam bootstrap -> Counter-Strike 2 (AppID 730). */
 public class CS2LauncherActivity extends MainActivity {
+    private static final String CS2_PROFILE_NAME = "CS2 Mobile";
+    private static final String PREF_PROFILE_ID = "cs2_controls_profile_id";
+    private static final String PREF_OVERLAY_OPACITY = "overlay_opacity";
+
     private final Handler handler = new Handler(Looper.getMainLooper());
     private TextView title;
     private TextView status;
     private Button action;
+    private Button controlsButton;
     private Container container;
     private boolean creatingContainer;
+    private boolean controlsSettingsVisible;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -42,10 +55,23 @@ public class CS2LauncherActivity extends MainActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (status != null) handler.postDelayed(this::refreshState, 500);
+        if (!controlsSettingsVisible && status != null) handler.postDelayed(this::refreshState, 500);
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (controlsSettingsVisible) {
+            controlsSettingsVisible = false;
+            buildUi();
+            handler.post(this::refreshState);
+            return;
+        }
+        super.onBackPressed();
     }
 
     private void buildUi() {
+        controlsSettingsVisible = false;
+
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setGravity(Gravity.CENTER);
@@ -70,8 +96,17 @@ public class CS2LauncherActivity extends MainActivity {
         action = new Button(this);
         action.setAllCaps(false);
         action.setTextSize(17);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(280), dp(58));
-        root.addView(action, lp);
+        LinearLayout.LayoutParams actionLp = new LinearLayout.LayoutParams(dp(280), dp(58));
+        root.addView(action, actionLp);
+
+        controlsButton = new Button(this);
+        controlsButton.setAllCaps(false);
+        controlsButton.setText("УПРАВЛЕНИЕ");
+        controlsButton.setTextSize(15);
+        controlsButton.setOnClickListener(v -> showControlsSettings());
+        LinearLayout.LayoutParams controlsLp = new LinearLayout.LayoutParams(dp(280), dp(54));
+        controlsLp.topMargin = dp(12);
+        root.addView(controlsButton, controlsLp);
 
         TextView note = new TextView(this);
         note.setText("Steam авторизация выполняется самим Steam. Игра скачивается из Steam и не входит в APK.");
@@ -84,13 +119,199 @@ public class CS2LauncherActivity extends MainActivity {
         setContentView(root);
     }
 
+    private void showControlsSettings() {
+        controlsSettingsVisible = true;
+        ControlsProfile profile = ensureCs2ControlsProfile();
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setGravity(Gravity.CENTER_HORIZONTAL);
+        root.setPadding(dp(28), dp(24), dp(28), dp(24));
+        root.setBackgroundColor(Color.rgb(12, 14, 18));
+
+        TextView header = new TextView(this);
+        header.setText("УПРАВЛЕНИЕ");
+        header.setTextColor(Color.WHITE);
+        header.setTextSize(25);
+        header.setGravity(Gravity.CENTER);
+        root.addView(header, new LinearLayout.LayoutParams(-1, -2));
+
+        TextView hint = new TextView(this);
+        hint.setText("Настрой как в мобильном шутере: перетаскивай кнопки, меняй их размер, прозрачность и назначение.");
+        hint.setTextColor(Color.rgb(170, 177, 188));
+        hint.setTextSize(13);
+        hint.setGravity(Gravity.CENTER);
+        hint.setPadding(0, dp(8), 0, dp(22));
+        root.addView(hint, new LinearLayout.LayoutParams(-1, -2));
+
+        TextView sensitivityLabel = new TextView(this);
+        sensitivityLabel.setTextColor(Color.WHITE);
+        sensitivityLabel.setTextSize(15);
+        root.addView(sensitivityLabel, new LinearLayout.LayoutParams(-1, -2));
+
+        SeekBar sensitivity = new SeekBar(this);
+        sensitivity.setMax(100);
+        float currentSpeed = profile != null && !Float.isNaN(profile.getCursorSpeed()) ? profile.getCursorSpeed() : 1.0f;
+        sensitivity.setProgress(speedToProgress(currentSpeed));
+        updateSensitivityLabel(sensitivityLabel, currentSpeed);
+        sensitivity.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                float speed = progressToSpeed(progress);
+                updateSensitivityLabel(sensitivityLabel, speed);
+                if (fromUser && profile != null) {
+                    profile.setCursorSpeed(speed);
+                    profile.save();
+                }
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+        root.addView(sensitivity, new LinearLayout.LayoutParams(-1, -2));
+
+        TextView opacityLabel = new TextView(this);
+        opacityLabel.setTextColor(Color.WHITE);
+        opacityLabel.setTextSize(15);
+        opacityLabel.setPadding(0, dp(16), 0, 0);
+        root.addView(opacityLabel, new LinearLayout.LayoutParams(-1, -2));
+
+        SeekBar opacity = new SeekBar(this);
+        opacity.setMax(100);
+        int opacityProgress = Math.round(prefs.getFloat(PREF_OVERLAY_OPACITY, 0.65f) * 100f);
+        opacity.setProgress(opacityProgress);
+        updateOpacityLabel(opacityLabel, opacityProgress);
+        opacity.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                int clamped = Math.max(15, progress);
+                updateOpacityLabel(opacityLabel, clamped);
+                if (fromUser) prefs.edit().putFloat(PREF_OVERLAY_OPACITY, clamped / 100f).apply();
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+        root.addView(opacity, new LinearLayout.LayoutParams(-1, -2));
+
+        Button editor = new Button(this);
+        editor.setAllCaps(false);
+        editor.setText("РЕДАКТОР HUD");
+        editor.setTextSize(16);
+        editor.setEnabled(profile != null);
+        editor.setOnClickListener(v -> {
+            ControlsProfile latest = ensureCs2ControlsProfile();
+            if (latest == null) return;
+            Intent intent = new Intent(this, ControlsEditorActivity.class);
+            intent.putExtra("profile_id", latest.id);
+            startActivity(intent);
+        });
+        LinearLayout.LayoutParams editorLp = new LinearLayout.LayoutParams(dp(300), dp(56));
+        editorLp.topMargin = dp(22);
+        root.addView(editor, editorLp);
+
+        TextView editorHint = new TextView(this);
+        editorHint.setText("В редакторе: зажми кнопку и тащи. Через настройки элемента меняются размер, прозрачность, действие и подпись.");
+        editorHint.setTextColor(Color.rgb(125, 133, 146));
+        editorHint.setTextSize(12);
+        editorHint.setGravity(Gravity.CENTER);
+        editorHint.setPadding(0, dp(8), 0, 0);
+        root.addView(editorHint, new LinearLayout.LayoutParams(-1, -2));
+
+        Button reset = new Button(this);
+        reset.setAllCaps(false);
+        reset.setText("СБРОСИТЬ РАСКЛАДКУ");
+        reset.setOnClickListener(v -> {
+            resetCs2ControlsProfile();
+            prefs.edit().putFloat(PREF_OVERLAY_OPACITY, 0.65f).apply();
+            showControlsSettings();
+        });
+        LinearLayout.LayoutParams resetLp = new LinearLayout.LayoutParams(dp(300), dp(50));
+        resetLp.topMargin = dp(14);
+        root.addView(reset, resetLp);
+
+        Button back = new Button(this);
+        back.setAllCaps(false);
+        back.setText("НАЗАД");
+        back.setOnClickListener(v -> {
+            controlsSettingsVisible = false;
+            buildUi();
+            refreshState();
+        });
+        LinearLayout.LayoutParams backLp = new LinearLayout.LayoutParams(dp(300), dp(50));
+        backLp.topMargin = dp(10);
+        root.addView(back, backLp);
+
+        setContentView(root);
+    }
+
+    private void updateSensitivityLabel(TextView label, float speed) {
+        label.setText(String.format(java.util.Locale.US, "Чувствительность камеры: %.2fx", speed));
+    }
+
+    private void updateOpacityLabel(TextView label, int value) {
+        label.setText("Прозрачность HUD: " + value + "%");
+    }
+
+    private int speedToProgress(float speed) {
+        float clamped = Math.max(0.25f, Math.min(3.0f, speed));
+        return Math.round(((clamped - 0.25f) / 2.75f) * 100f);
+    }
+
+    private float progressToSpeed(int progress) {
+        return 0.25f + (Math.max(0, Math.min(100, progress)) / 100f) * 2.75f;
+    }
+
+    private ControlsProfile ensureCs2ControlsProfile() {
+        InputControlsManager manager = new InputControlsManager(this);
+        ArrayList<ControlsProfile> profiles = manager.getProfiles();
+
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+        int savedId = prefs.getInt(PREF_PROFILE_ID, 0);
+        if (savedId > 0) {
+            ControlsProfile saved = manager.getProfile(savedId);
+            if (saved != null && CS2_PROFILE_NAME.equals(saved.getName())) return saved;
+        }
+
+        for (ControlsProfile p : profiles) {
+            if (CS2_PROFILE_NAME.equals(p.getName())) {
+                prefs.edit().putInt(PREF_PROFILE_ID, p.id).apply();
+                return p;
+            }
+        }
+
+        ControlsProfile fps = manager.getProfile(4);
+        if (fps == null) return null;
+
+        ControlsProfile custom = manager.duplicateProfile(fps);
+        custom.setName(CS2_PROFILE_NAME);
+        custom.save();
+        prefs.edit().putInt(PREF_PROFILE_ID, custom.id).apply();
+        return custom;
+    }
+
+    private void resetCs2ControlsProfile() {
+        ControlsProfile profile = ensureCs2ControlsProfile();
+        if (profile == null) return;
+
+        try {
+            JSONObject data = new JSONObject(FileUtils.readString(this, "inputcontrols/profiles/controls-4.icp"));
+            data.put("id", profile.id);
+            data.put("name", CS2_PROFILE_NAME);
+            FileUtils.writeString(ControlsProfile.getProfileFile(this, profile.id), data.toString());
+        } catch (Exception ignored) {}
+    }
+
     private void refreshState() {
+        if (controlsSettingsVisible) return;
+
         RootFS rootFS = RootFS.find(this);
         if (!rootFS.isValid()) {
             setState("Подготовка игрового окружения…", "ПОДОЖДАТЬ", false, null);
             handler.postDelayed(this::refreshState, 1200);
             return;
         }
+
+        ensureCs2ControlsProfile();
 
         if (container == null) {
             ContainerManager manager = new ContainerManager(this);
@@ -122,7 +343,7 @@ public class CS2LauncherActivity extends MainActivity {
             return;
         }
 
-        setState("CS2 установлен · мобильное управление готово", "ИГРАТЬ", true,
+        setState("CS2 установлен · управление можно настроить под себя", "ИГРАТЬ", true,
                 () -> launch(steam, "-silent -applaunch 730 -novid -fullscreen +fps_max 30", true));
     }
 
@@ -173,7 +394,10 @@ public class CS2LauncherActivity extends MainActivity {
         i.putExtra("container_id", container.id);
         i.putExtra("exec_path", exe.getAbsolutePath());
         if (args != null && !args.isEmpty()) i.putExtra("exec_args", args);
-        if (controls) i.putExtra("controls_profile_id", 4); // bundled FPS profile
+        if (controls) {
+            ControlsProfile profile = ensureCs2ControlsProfile();
+            if (profile != null) i.putExtra("controls_profile_id", profile.id);
+        }
         startActivity(i);
     }
 
