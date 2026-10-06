@@ -4,21 +4,26 @@ import re, sys
 
 root = Path(sys.argv[1]).resolve()
 launcher_src = Path(__file__).resolve().parents[1] / "patches" / "CS2LauncherActivity.java"
+icon_src = Path(__file__).resolve().parents[1] / "patches" / "ic_cs2_mobile.xml"
 java_dir = root / "app/src/main/java/com/winlator"
 (java_dir / "CS2LauncherActivity.java").write_text(launcher_src.read_text(encoding="utf-8"), encoding="utf-8")
+drawable_dir = root / "app/src/main/res/drawable"
+(drawable_dir / "ic_cs2_mobile.xml").write_text(icon_src.read_text(encoding="utf-8"), encoding="utf-8")
 
 # Brand/package metadata while keeping the Java namespace com.winlator for upstream compatibility.
 gradle = root / "app/build.gradle"
 s = gradle.read_text(encoding="utf-8")
 s = s.replace("applicationId 'com.winlator'", "applicationId 'com.reverfyx.cs2mobile'")
-s = s.replace('versionCode 33', 'versionCode 41')
-s = s.replace('versionName "11.2"', 'versionName "0.4.1-alpha"')
+s = s.replace('versionCode 33', 'versionCode 42')
+s = s.replace('versionName "11.2"', 'versionName "0.4.2-alpha"')
 gradle.write_text(s, encoding="utf-8")
 
-strings = root / "app/src/main/res/values/strings.xml"
-s = strings.read_text(encoding="utf-8")
-s = re.sub(r'<string name="app_name">.*?</string>', '<string name="app_name">CS2 Mobile</string>', s, count=1)
-strings.write_text(s, encoding="utf-8")
+# Replace Winlator branding in every localized string table so Android cannot pick an old localized app name.
+for strings in (root / "app/src/main/res").glob("values*/strings.xml"):
+    s = strings.read_text(encoding="utf-8")
+    s = re.sub(r'<string name="app_name">.*?</string>', '<string name="app_name">CS2 Mobile</string>', s, count=1)
+    s = s.replace("Winlator", "CS2 Mobile")
+    strings.write_text(s, encoding="utf-8")
 
 manifest = root / "app/src/main/AndroidManifest.xml"
 s = manifest.read_text(encoding="utf-8")
@@ -44,6 +49,7 @@ launcher_block = '''
 '''
 s = s.replace('        <activity android:name="com.winlator.XServerDisplayActivity"', launcher_block + '\n        <activity android:name="com.winlator.XServerDisplayActivity"', 1)
 s = s.replace('android:authorities="com.winlator.FileProvider"', 'android:authorities="com.reverfyx.cs2mobile.FileProvider"')
+s = s.replace('android:icon="@mipmap/ic_launcher"', 'android:icon="@drawable/ic_cs2_mobile"\n        android:roundIcon="@drawable/ic_cs2_mobile"')
 manifest.write_text(s, encoding="utf-8")
 
 # Let the single-purpose launcher pass command-line arguments and force the selected touch profile.
@@ -96,3 +102,11 @@ x = x.replace(old2, new2, 1)
 xfile.write_text(x, encoding="utf-8")
 
 print("Patched Winlator for CS2-only Android launcher")
+
+
+# Decouple rootfs installation from Winlator MainActivity so our launcher is a normal AppCompatActivity.
+rfi = java_dir / "xenvironment/RootFSInstaller.java"
+rs = rfi.read_text(encoding="utf-8")
+rs = rs.replace("public static void install(final MainActivity activity)", "public static void install(final AppCompatActivity activity)")
+rs = rs.replace("public static void installIfNeeded(final MainActivity activity)", "public static void installIfNeeded(final AppCompatActivity activity)")
+rfi.write_text(rs, encoding="utf-8")
